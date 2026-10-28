@@ -595,7 +595,7 @@
         };
 
         let availability;
-        let existingAppointments = [];
+        let bookedTimes = [];
 
         async function apiRequest(path, options = {}) {
           const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -718,12 +718,7 @@
               ) {
                 return false;
               }
-              return !existingAppointments.some(
-                (appointment) =>
-                  appointment.date === elements.date.value &&
-                  ['pending', 'approved'].includes(appointment.status) &&
-                  appointment.time === time,
-              );
+              return !bookedTimes.includes(time);
             });
 
           if (!slotTimes.length) {
@@ -839,7 +834,7 @@
               },
             });
 
-            existingAppointments.push(result.appointment);
+            bookedTimes.push(result.appointment.time);
             elements.name.value = '';
             elements.email.value = '';
             clearTimeSelection();
@@ -876,23 +871,48 @@
           const todayValue = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
           elements.date.min = todayValue;
           elements.date.value = todayValue;
-          elements.date.addEventListener('change', renderSlots);
+          elements.date.addEventListener('change', () => {
+            void loadBookedTimes();
+          });
           elements.form.addEventListener('submit', handleSubmit);
           elements.timeZone.textContent = 'Loading schedule';
 
           try {
-            const [availabilityResult, appointmentsResult] = await Promise.all([
-              apiRequest('/availability'),
-              apiRequest('/appointments?status=all'),
-            ]);
+            const availabilityResult = await apiRequest('/availability');
             availability = availabilityResult.availability;
-            existingAppointments = appointmentsResult.appointments;
             elements.timeZone.textContent = availability.timeZone;
             elements.summaryZone.textContent = availability.timeZone;
-            renderSlots();
+            await loadBookedTimes();
           } catch (error) {
             elements.timeZone.textContent = 'Unavailable';
             elements.summaryZone.textContent = 'Unavailable';
+            elements.slots.replaceChildren(
+              createSlotMessage(
+                `Could not load appointment times: ${error.message}`,
+              ),
+            );
+            setMessage('Please refresh the page or try again later.');
+          }
+        }
+
+        async function loadBookedTimes() {
+          if (!availability || !elements.date.value) return;
+          const date = elements.date.value;
+          elements.slots.replaceChildren(
+            createSlotMessage('Checking available times...'),
+          );
+          clearTimeSelection();
+          refreshSelectionSummary();
+          try {
+            const result = await apiRequest(
+              `/appointments?view=slots&date=${encodeURIComponent(date)}`,
+            );
+            if (elements.date.value !== date) return;
+            bookedTimes = result.bookedSlots;
+            renderSlots();
+          } catch (error) {
+            if (elements.date.value !== date) return;
+            bookedTimes = [];
             elements.slots.replaceChildren(
               createSlotMessage(
                 `Could not load appointment times: ${error.message}`,

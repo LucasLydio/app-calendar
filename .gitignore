@@ -59,6 +59,8 @@ build/Release
 
 # Dependency directories
 node_modules/
+/.netlify/
+/public/
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)

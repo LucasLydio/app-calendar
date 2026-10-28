@@ -1,0 +1,72 @@
+[build]
+  command = "npm run build"
+  publish = "public"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+  CALENDAR_APPOINTMENT_DURATION_MINUTES = "60"
+  CALENDAR_WORKER_MAX_ATTEMPTS = "5"
+  GOOGLE_CALENDAR_ID = "primary"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["@neondatabase/serverless", "web-push"]
+
+[functions."calendar-sync"]
+  schedule = "* * * * *"
+
+[functions."push-notification-background"]
+  background = true
+
+[[redirects]]
+  from = "/api/appointments/:id/approve"
+  to = "/.netlify/functions/appointment-action?id=:id&action=approve"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/appointments/:id/reject"
+  to = "/.netlify/functions/appointment-action?id=:id&action=reject"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/appointments/:id/ics"
+  to = "/.netlify/functions/appointment-ics?id=:id"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/appointments"
+  to = "/.netlify/functions/appointments"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/availability"
+  to = "/.netlify/functions/availability"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/push/*"
+  to = "/.netlify/functions/push"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/book"
+  to = "/book.html"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Service-Worker-Allowed = "/"
+    Cache-Control = "no-cache"
