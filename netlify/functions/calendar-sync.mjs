@@ -4,7 +4,7 @@ import { db, getAvailability } from './lib/db.mjs';
 
 const BATCH_SIZE = 3;
 const MAX_ATTEMPTS = Number(process.env.CALENDAR_WORKER_MAX_ATTEMPTS) || 5;
-const LEASE_SECONDS = 90;
+const LEASE_SECONDS = 1800;
 const GOOGLE_API = 'https://www.googleapis.com/calendar/v3';
 
 async function getAccessToken() {
