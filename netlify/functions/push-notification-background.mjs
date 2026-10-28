@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
 import webPush from 'web-push';
-import { getSql, getSubscriptionsForUser } from './lib/db.mjs';
+import { pushSubscriptions } from '../../db/schema.ts';
+import { db, getSubscriptionsForUser } from './lib/db.mjs';
 import { getVapidPublicKey } from './lib/push.mjs';
 
 export default async function handler(request) {
@@ -21,11 +23,7 @@ export default async function handler(request) {
       return new Response('Push is not configured', { status: 200 });
     }
     getVapidPublicKey();
-    const sql = getSql();
-    const subscriptions = await getSubscriptionsForUser(
-      appointment.userId,
-      sql,
-    );
+    const subscriptions = await getSubscriptionsForUser(appointment.userId, db);
     const payload = JSON.stringify({
       title:
         status === 'approved' ? 'Appointment approved' : 'Appointment update',
@@ -43,7 +41,9 @@ export default async function handler(request) {
           await webPush.sendNotification(subscription, payload);
         } catch (error) {
           if (error.statusCode === 404 || error.statusCode === 410) {
-            await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
+            await db
+              .delete(pushSubscriptions)
+              .where(eq(pushSubscriptions.endpoint, endpoint));
           }
           throw error;
         }

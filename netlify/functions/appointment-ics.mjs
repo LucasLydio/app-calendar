@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
+import { appointments } from '../../db/schema.ts';
 import { buildIcsCalendar } from './lib/calendar.mjs';
-import { appointmentFromRow, getAvailability, getSql } from './lib/db.mjs';
+import { appointmentFromRow, db, getAvailability } from './lib/db.mjs';
 import { errorResponse, jsonResponse } from './lib/http.mjs';
 
 export default async function handler(request) {
@@ -11,18 +13,21 @@ export default async function handler(request) {
     }
     const id = new URL(request.url).searchParams.get('id');
     if (!id) return jsonResponse({ error: 'Appointment ID is required.' }, 400);
-    const sql = getSql();
-    const rows = await sql`SELECT * FROM appointments WHERE id = ${id}`;
-    if (!rows[0]) return jsonResponse({ error: 'Appointment not found.' }, 404);
-    if (rows[0].status !== 'approved') {
+    const [row] = await db
+      .select()
+      .from(appointments)
+      .where(eq(appointments.id, id))
+      .limit(1);
+    if (!row) return jsonResponse({ error: 'Appointment not found.' }, 404);
+    if (row.status !== 'approved') {
       return jsonResponse(
         { error: 'Only approved appointments can be exported.' },
         409,
       );
     }
 
-    const appointment = appointmentFromRow(rows[0]);
-    const availability = await getAvailability(sql);
+    const appointment = appointmentFromRow(row);
+    const availability = await getAvailability();
     const content = buildIcsCalendar(
       appointment,
       availability.timeZone,

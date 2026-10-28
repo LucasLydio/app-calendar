@@ -21,7 +21,7 @@ export async function readJson(request) {
 }
 
 export function errorResponse(error) {
-  if (error?.code === '23505') {
+  if (error?.code === '23505' || error?.cause?.code === '23505') {
     return jsonResponse(
       {
         error:

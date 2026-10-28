@@ -1,5 +1,7 @@
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import { appointmentFromRow, getAvailability, getSql } from './lib/db.mjs';
+import { appointments } from '../../db/schema.ts';
+import { appointmentFromRow, db, getAvailability } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -48,7 +50,6 @@ function slotIsAvailable(weeklySlots, date, time) {
 
 export default async function handler(request) {
   try {
-    const sql = getSql();
     const url = new URL(request.url);
 
     if (request.method === 'GET') {
@@ -60,15 +61,18 @@ export default async function handler(request) {
             400,
           );
         }
-        const bookedRows = await sql`
-          SELECT appointment_time
-          FROM appointments
-          WHERE appointment_date = ${date}::date
-            AND status IN ('pending', 'approved')
-        `;
+        const bookedRows = await db
+          .select({ requestedTime: appointments.requestedTime })
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.requestedDate, date),
+              inArray(appointments.status, ['pending', 'approved']),
+            ),
+          );
         return jsonResponse({
           bookedSlots: bookedRows.map((row) =>
-            String(row.appointment_time).slice(0, 5),
+            String(row.requestedTime).slice(0, 5),
           ),
         });
       }
@@ -79,10 +83,16 @@ export default async function handler(request) {
           400,
         );
       }
-      const rows =
-        status === 'all'
-          ? await sql`SELECT * FROM appointments ORDER BY appointment_date, appointment_time`
-          : await sql`SELECT * FROM appointments WHERE status = ${status} ORDER BY appointment_date, appointment_time`;
+      let query = db
+        .select()
+        .from(appointments)
+        .orderBy(
+          asc(appointments.requestedDate),
+          asc(appointments.requestedTime),
+        );
+      if (status !== 'all')
+        query = query.where(eq(appointments.status, status));
+      const rows = await query;
       return jsonResponse({ appointments: rows.map(appointmentFromRow) });
     }
 
@@ -120,8 +130,8 @@ export default async function handler(request) {
       return jsonResponse({ error: 'userId must be a non-empty string.' }, 400);
     }
 
-    const availability = await getAvailability(sql);
-    if (!slotIsAvailable(availability.weeklySlots, date, time)) {
+    const currentAvailability = await getAvailability();
+    if (!slotIsAvailable(currentAvailability.weeklySlots, date, time)) {
       return jsonResponse(
         {
           error:
@@ -130,7 +140,7 @@ export default async function handler(request) {
         409,
       );
     }
-    if (!futureInZone(date, time, availability.timeZone)) {
+    if (!futureInZone(date, time, currentAvailability.timeZone)) {
       return jsonResponse(
         { error: 'Appointments must be requested for a future date and time.' },
         409,
@@ -146,18 +156,20 @@ export default async function handler(request) {
       date,
       time,
     };
-    const rows = await sql`
-      INSERT INTO appointments (
-        id, user_id, customer_name, customer_email, service,
-        appointment_date, appointment_time, status, calendar_sync_status
-      ) VALUES (
-        ${appointment.id}, ${appointment.userId}, ${appointment.name}, ${appointment.email},
-        ${appointment.service}, ${appointment.date}, ${appointment.time}, 'pending', 'not_queued'
-      )
-      RETURNING *
-    `;
+    const [row] = await db
+      .insert(appointments)
+      .values({
+        id: appointment.id,
+        userId: appointment.userId,
+        customerName: appointment.name,
+        customerEmail: appointment.email,
+        service: appointment.service,
+        requestedDate: appointment.date,
+        requestedTime: appointment.time,
+      })
+      .returning();
     return jsonResponse(
-      { appointment: appointmentFromRow(rows[0]), userId: appointment.userId },
+      { appointment: appointmentFromRow(row), userId: appointment.userId },
       201,
     );
   } catch (error) {

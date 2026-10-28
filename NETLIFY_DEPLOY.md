@@ -1,10 +1,21 @@
 # Netlify deployment
 
+## Netlify Database
+
+Install `@netlify/database` and connect the site to Netlify Database. Netlify
+provisions the database and supplies the connection to the native Drizzle
+adapter, including isolated branches for deploy previews. Do not configure a
+separate `DATABASE_URL` or run manual database migrations.
+
+Drizzle schema migrations are generated into
+`netlify/database/migrations` and applied automatically by Netlify during
+deploys. Change the schema in `db/schema.ts`, then generate migration files with
+`npx drizzle-kit generate`; do not run `drizzle-kit push` or a manual migrator.
+
 ## Required environment variables
 
 In Netlify, open **Site configuration > Environment variables** (sometimes shown as **Site settings > Environment variables**) and add the following variables. Set their scope to **Functions**; add **Builds** only if a build step needs a variable. Do not put secret values in `netlify.toml` or commit them:
 
-- `DATABASE_URL`: Neon Postgres connection string.
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`: Web Push VAPID key pair.
 - `INTERNAL_FUNCTION_TOKEN`: long random secret used to authorize the internal push-background invocation.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`: Google Calendar OAuth credentials.
@@ -17,11 +28,10 @@ After changing environment variables, trigger a new deploy so the deployed funct
 
 ## Initialize and run
 
-1. Create a Neon Postgres database and set `DATABASE_URL` locally without committing it.
-2. Apply the schema once: `npm run db:migrate`.
-3. Set the required environment variables for the Netlify site.
-4. Test locally with `npx netlify dev`.
-5. Deploy with the Netlify CLI or connect the repository in Netlify. The build runs `npm run build`, publishes `public/`, and packages `netlify/functions/`.
+1. Connect Netlify Database to the site in the Netlify UI.
+2. Set the required function environment variables for the Netlify site.
+3. Test locally with `npx netlify dev`.
+4. Deploy with the Netlify CLI or connect the repository in Netlify. Netlify automatically applies migrations before publishing; the build runs `npm run build`, publishes `public/`, and packages `netlify/functions/`.
 
 The scheduled `calendar-sync` function runs once per minute on published deploys. Deploy Previews do not run schedules automatically; invoke the function manually for preview testing.
 

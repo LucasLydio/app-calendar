@@ -1,5 +1,7 @@
+import { and, eq } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import { appointmentFromRow, getSql } from './lib/db.mjs';
+import { appointments, calendarOutbox } from '../../db/schema.ts';
+import { appointmentFromRow, db } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 
 export default async function handler(request) {
@@ -27,40 +29,51 @@ export default async function handler(request) {
     ) {
       return jsonResponse({ error: 'reason must be a string.' }, 400);
     }
-    const sql = getSql();
     const decision = action === 'approve' ? 'approved' : 'rejected';
     const rejectionReason =
       action === 'reject' ? body.reason?.trim() || null : null;
     const outboxId = crypto.randomUUID();
-    const changed = await sql`
-      WITH updated AS (
-        UPDATE appointments
-        SET status = ${decision}, decided_at = now(),
-            calendar_sync_status = ${action === 'approve' ? 'pending' : 'not_queued'},
-            rejection_reason = ${rejectionReason}
-        WHERE id = ${appointmentId} AND status = 'pending'
-        RETURNING *
-      ), queued AS (
-        INSERT INTO calendar_sync_outbox (id, appointment_id)
-        SELECT ${outboxId}::uuid, id FROM updated WHERE ${action === 'approve'}
-        ON CONFLICT (appointment_id) WHERE status IN ('pending', 'processing') DO NOTHING
-        RETURNING id
-      )
-      SELECT * FROM updated
-    `;
+    const changed = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(appointments)
+        .set({
+          status: decision,
+          decidedAt: new Date(),
+          calendarSyncStatus: action === 'approve' ? 'pending' : 'not_queued',
+          rejectionReason,
+        })
+        .where(
+          and(
+            eq(appointments.id, appointmentId),
+            eq(appointments.status, 'pending'),
+          ),
+        )
+        .returning();
+      if (updated && action === 'approve') {
+        await tx.insert(calendarOutbox).values({
+          id: outboxId,
+          appointmentId: updated.id,
+          action: 'create',
+        });
+      }
+      return updated;
+    });
 
-    if (!changed[0]) {
-      const existing =
-        await sql`SELECT status FROM appointments WHERE id = ${appointmentId}`;
-      if (!existing[0])
+    if (!changed) {
+      const [existing] = await db
+        .select({ status: appointments.status })
+        .from(appointments)
+        .where(eq(appointments.id, appointmentId))
+        .limit(1);
+      if (!existing)
         return jsonResponse({ error: 'Appointment not found.' }, 404);
       return jsonResponse(
-        { error: `Appointment is already ${existing[0].status}.` },
+        { error: `Appointment is already ${existing.status}.` },
         409,
       );
     }
 
-    const appointment = appointmentFromRow(changed[0]);
+    const appointment = appointmentFromRow(changed);
     let push = { queued: false };
     const internalToken = process.env.INTERNAL_FUNCTION_TOKEN;
     if (internalToken) {

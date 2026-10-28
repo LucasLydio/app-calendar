@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm';
 import { buildGoogleEventPayload, googleEventId } from './lib/calendar.mjs';
-import { getAvailability, getSql } from './lib/db.mjs';
+import { db, getAvailability } from './lib/db.mjs';
 
 const BATCH_SIZE = 3;
 const MAX_ATTEMPTS = Number(process.env.CALENDAR_WORKER_MAX_ATTEMPTS) || 5;
@@ -132,18 +133,23 @@ async function syncGoogleAppointment(appointment, timeZone, accessToken) {
   );
 }
 
-async function claimJobs(sql) {
-  return sql`
+async function executeRows(query) {
+  const result = await db.execute(query);
+  return result.rows;
+}
+
+async function claimJobs() {
+  return executeRows(sql`
     WITH candidates AS (
       SELECT id
-      FROM calendar_sync_outbox
+      FROM calendar_outbox
       WHERE (status = 'pending' AND next_attempt_at <= now())
          OR (status = 'processing' AND locked_until < now())
       ORDER BY created_at
       LIMIT ${BATCH_SIZE}
       FOR UPDATE SKIP LOCKED
     ), claimed AS (
-      UPDATE calendar_sync_outbox AS jobs
+      UPDATE calendar_outbox AS jobs
       SET status = 'processing', attempts = jobs.attempts + 1,
           locked_until = now() + (${LEASE_SECONDS} * interval '1 second')
       FROM candidates
@@ -157,7 +163,7 @@ async function claimJobs(sql) {
            appointments.status AS appointment_status
     FROM claimed
     JOIN appointments ON appointments.id = claimed.appointment_id
-  `;
+  `);
 }
 
 function appointmentFromJob(row) {
@@ -173,10 +179,10 @@ function appointmentFromJob(row) {
   };
 }
 
-async function markSynced(sql, job, appointment, eventId) {
-  await sql`
+async function markSynced(job, appointment, eventId) {
+  await executeRows(sql`
     WITH job_update AS (
-      UPDATE calendar_sync_outbox
+      UPDATE calendar_outbox
       SET status = 'synced', google_event_id = ${eventId}, completed_at = now(),
           locked_until = NULL, last_error = NULL
       WHERE id = ${job.job_id}
@@ -185,18 +191,18 @@ async function markSynced(sql, job, appointment, eventId) {
     SET calendar_sync_status = 'synced', google_event_id = ${eventId},
         calendar_synced_at = now(), calendar_sync_error = NULL
     WHERE id = ${appointment.id} AND status = 'approved'
-  `;
+  `);
 }
 
-async function markFailed(sql, job, appointment, error) {
+async function markFailed(job, appointment, error) {
   const transient = error.transient === true;
   const retry = transient && job.attempts < MAX_ATTEMPTS;
   const delaySeconds = Math.min(3600, 30 * 2 ** Math.max(0, job.attempts - 1));
   const message = (error.message || 'Calendar sync failed.').slice(0, 1000);
 
-  await sql`
+  await executeRows(sql`
     WITH job_update AS (
-      UPDATE calendar_sync_outbox
+      UPDATE calendar_outbox
       SET status = ${retry ? 'pending' : 'failed'},
           next_attempt_at = now() + (${delaySeconds} * interval '1 second'),
           locked_until = NULL, last_error = ${message},
@@ -207,25 +213,24 @@ async function markFailed(sql, job, appointment, error) {
     SET calendar_sync_status = ${retry ? 'pending' : 'failed'},
         calendar_sync_error = ${message}
     WHERE id = ${appointment.id} AND status = 'approved'
-  `;
+  `);
   console.error(
     `Calendar sync job ${job.job_id} failed on attempt ${job.attempts}: ${message}`,
   );
 }
 
 export default async function handler() {
-  const sql = getSql();
   try {
-    const jobs = await claimJobs(sql);
+    const jobs = await claimJobs();
     if (!jobs.length)
       return new Response('No calendar sync jobs due.', { status: 200 });
-    const availability = await getAvailability(sql);
+    const availability = await getAvailability();
     let accessToken;
     try {
       accessToken = await getAccessToken();
     } catch (error) {
       await Promise.all(
-        jobs.map((job) => markFailed(sql, job, appointmentFromJob(job), error)),
+        jobs.map((job) => markFailed(job, appointmentFromJob(job), error)),
       );
       return new Response(`Processed ${jobs.length} calendar sync job(s).`, {
         status: 200,
@@ -237,7 +242,6 @@ export default async function handler() {
         const appointment = appointmentFromJob(job);
         if (appointment.status !== 'approved') {
           await markFailed(
-            sql,
             job,
             appointment,
             new Error('Only approved appointments can be synced.'),
@@ -250,9 +254,9 @@ export default async function handler() {
             availability.timeZone,
             accessToken,
           );
-          await markSynced(sql, job, appointment, event.id);
+          await markSynced(job, appointment, event.id);
         } catch (error) {
-          await markFailed(sql, job, appointment, error);
+          await markFailed(job, appointment, error);
         }
       }),
     );

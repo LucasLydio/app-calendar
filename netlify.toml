@@ -4,17 +4,17 @@
   functions = "netlify/functions"
 
 [build.environment]
-  NODE_VERSION = "22"
+  NODE_VERSION = "22.12.0"
   # This committed file contains development examples and documented placeholders.
   # Keep secret scanning enabled for source code, functions, and generated build files.
   SECRETS_SCAN_OMIT_PATHS = ".env.example"
   # These values are public paths, identifiers, numeric settings, or local-only
   # configuration. They are intentionally present in source code and tests.
-  SECRETS_SCAN_OMIT_KEYS = "DATABASE_URL, VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY,VAPID_SUBJECT,INTERNAL_FUNCTION_TOKEN,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REFRESH_TOKEN,GOOGLE_CALENDAR_ID,CALENDAR_APPOINTMENT_DURATION_MINUTES,CALENDAR_WORKER_MAX_ATTEMPTS"
+  SECRETS_SCAN_OMIT_KEYS = "VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY,VAPID_SUBJECT,INTERNAL_FUNCTION_TOKEN,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REFRESH_TOKEN,GOOGLE_CALENDAR_ID,CALENDAR_APPOINTMENT_DURATION_MINUTES,CALENDAR_WORKER_MAX_ATTEMPTS"
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["@neondatabase/serverless", "web-push"]
+  external_node_modules = ["web-push"]
 
 [functions."calendar-sync"]
   schedule = "* * * * *"

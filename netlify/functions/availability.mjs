@@ -1,4 +1,5 @@
-import { getAvailability, getSql } from './lib/db.mjs';
+import { availability as availabilityTable } from '../../db/schema.ts';
+import { db, getAvailability } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 
 const DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
@@ -6,9 +7,8 @@ const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export default async function handler(request) {
   try {
-    const sql = getSql();
     if (request.method === 'GET') {
-      return jsonResponse({ availability: await getAvailability(sql) });
+      return jsonResponse({ availability: await getAvailability() });
     }
     if (request.method !== 'PUT') {
       return jsonResponse({ error: 'Method not allowed.' }, 405, {
@@ -61,17 +61,22 @@ export default async function handler(request) {
       start,
       end,
     }));
-    const rows = await sql`
-      UPDATE manager_availability
-      SET time_zone = ${timeZone.trim()}, weekly_slots = ${JSON.stringify(normalizedSlots)}::jsonb,
-          updated_at = now()
-      WHERE singleton_id = 1
-      RETURNING time_zone, weekly_slots
-    `;
+    const [row] = await db
+      .insert(availabilityTable)
+      .values({ timeZone: timeZone.trim(), weeklySlots: normalizedSlots })
+      .onConflictDoUpdate({
+        target: availabilityTable.singletonId,
+        set: {
+          timeZone: timeZone.trim(),
+          weeklySlots: normalizedSlots,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
     return jsonResponse({
       availability: {
-        timeZone: rows[0].time_zone,
-        weeklySlots: rows[0].weekly_slots,
+        timeZone: row.timeZone,
+        weeklySlots: row.weeklySlots,
       },
     });
   } catch (error) {

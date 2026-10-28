@@ -1,4 +1,4 @@
-import { getSql } from './lib/db.mjs';
+import { db } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 import { getVapidPublicKey, savePushSubscription } from './lib/push.mjs';
 
@@ -28,7 +28,7 @@ export default async function handler(request) {
         400,
       );
     }
-    await savePushSubscription({ userId, subscription }, getSql());
+    await savePushSubscription({ userId, subscription }, db);
     return jsonResponse({ userId }, 201);
   } catch (error) {
     return errorResponse(error);

@@ -1,19 +1,18 @@
-CREATE TABLE IF NOT EXISTS manager_availability (
-  singleton_id integer PRIMARY KEY CHECK (singleton_id = 1),
+CREATE TABLE availability (
+  singleton_id integer PRIMARY KEY DEFAULT 1 CHECK (singleton_id = 1),
   time_zone text NOT NULL,
   weekly_slots jsonb NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-INSERT INTO manager_availability (singleton_id, time_zone, weekly_slots)
+INSERT INTO availability (singleton_id, time_zone, weekly_slots)
 VALUES (
   1,
   'UTC',
   '[{"day":"mon","start":"09:00","end":"17:00"},{"day":"tue","start":"09:00","end":"17:00"},{"day":"wed","start":"09:00","end":"17:00"},{"day":"thu","start":"09:00","end":"17:00"},{"day":"fri","start":"09:00","end":"17:00"}]'::jsonb
-)
-ON CONFLICT (singleton_id) DO NOTHING;
+);
 
-CREATE TABLE IF NOT EXISTS appointments (
+CREATE TABLE appointments (
   id text PRIMARY KEY,
   user_id text NOT NULL,
   customer_name text NOT NULL,
@@ -21,7 +20,8 @@ CREATE TABLE IF NOT EXISTS appointments (
   service text NOT NULL,
   appointment_date date NOT NULL,
   appointment_time time NOT NULL,
-  status text NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
   calendar_sync_status text NOT NULL DEFAULT 'not_queued'
     CHECK (calendar_sync_status IN ('not_queued', 'pending', 'synced', 'failed')),
   calendar_sync_error text,
@@ -32,27 +32,29 @@ CREATE TABLE IF NOT EXISTS appointments (
   decided_at timestamptz
 );
 
-CREATE INDEX IF NOT EXISTS appointments_status_date_idx
+CREATE INDEX appointments_status_date_idx
   ON appointments (status, appointment_date, appointment_time);
 
-CREATE UNIQUE INDEX IF NOT EXISTS appointments_active_slot_unique_idx
+CREATE UNIQUE INDEX appointments_active_slot_unique_idx
   ON appointments (appointment_date, appointment_time)
   WHERE status IN ('pending', 'approved');
 
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-  endpoint text PRIMARY KEY,
+CREATE TABLE push_subscriptions (
+  browser_id text PRIMARY KEY,
+  endpoint text NOT NULL UNIQUE,
+  keys jsonb NOT NULL,
   user_id text NOT NULL,
-  subscription jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS push_subscriptions_user_id_idx
+CREATE INDEX push_subscriptions_user_id_idx
   ON push_subscriptions (user_id);
 
-CREATE TABLE IF NOT EXISTS calendar_sync_outbox (
+CREATE TABLE calendar_outbox (
   id uuid PRIMARY KEY,
   appointment_id text NOT NULL REFERENCES appointments(id),
+  action text NOT NULL DEFAULT 'create',
   status text NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'processing', 'synced', 'failed')),
   attempts integer NOT NULL DEFAULT 0,
@@ -64,9 +66,9 @@ CREATE TABLE IF NOT EXISTS calendar_sync_outbox (
   completed_at timestamptz
 );
 
-CREATE INDEX IF NOT EXISTS calendar_sync_outbox_due_idx
-  ON calendar_sync_outbox (status, next_attempt_at, created_at);
+CREATE INDEX calendar_outbox_due_idx
+  ON calendar_outbox (status, next_attempt_at, created_at);
 
-CREATE UNIQUE INDEX IF NOT EXISTS calendar_sync_outbox_active_appointment_idx
-  ON calendar_sync_outbox (appointment_id)
+CREATE UNIQUE INDEX calendar_outbox_active_appointment_idx
+  ON calendar_outbox (appointment_id)
   WHERE status IN ('pending', 'processing');

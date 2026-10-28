@@ -1,5 +1,8 @@
+import { eq } from 'drizzle-orm';
+import crypto from 'node:crypto';
 import webPush from 'web-push';
-import { getSql, getSubscriptionsForUser } from './db.mjs';
+import { pushSubscriptions } from '../../../db/schema.ts';
+import { db, getSubscriptionsForUser } from './db.mjs';
 
 let vapidConfigured = false;
 
@@ -24,25 +27,40 @@ export function getVapidPublicKey() {
 
 export async function savePushSubscription(
   { userId, subscription },
-  sql = getSql(),
+  database = db,
 ) {
-  await sql`
-    INSERT INTO push_subscriptions (endpoint, user_id, subscription)
-    VALUES (${subscription.endpoint}, ${userId}, ${JSON.stringify(subscription)}::jsonb)
-    ON CONFLICT (endpoint) DO UPDATE
-    SET user_id = EXCLUDED.user_id,
-        subscription = EXCLUDED.subscription,
-        updated_at = now()
-  `;
+  const browserId = crypto
+    .createHash('sha256')
+    .update(subscription.endpoint)
+    .digest('hex');
+  await database
+    .insert(pushSubscriptions)
+    .values({
+      browserId,
+      endpoint: subscription.endpoint,
+      keys: subscription.keys,
+      userId,
+    })
+    .onConflictDoUpdate({
+      target: pushSubscriptions.endpoint,
+      set: {
+        keys: subscription.keys,
+        userId,
+        updatedAt: new Date(),
+      },
+    });
 }
 
-export async function sendAppointmentPush(appointment, status, sql = getSql()) {
+export async function sendAppointmentPush(appointment, status, database = db) {
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     console.warn('Push delivery skipped: VAPID keys are not configured.');
     return { attempted: 0, sent: 0, failed: 0 };
   }
   getVapidPublicKey();
-  const subscriptions = await getSubscriptionsForUser(appointment.userId, sql);
+  const subscriptions = await getSubscriptionsForUser(
+    appointment.userId,
+    database,
+  );
   const payload = JSON.stringify({
     title:
       status === 'approved' ? 'Appointment approved' : 'Appointment update',
@@ -61,7 +79,9 @@ export async function sendAppointmentPush(appointment, status, sql = getSql()) {
         return true;
       } catch (error) {
         if (error.statusCode === 404 || error.statusCode === 410) {
-          await sql`DELETE FROM push_subscriptions WHERE endpoint = ${entry.endpoint}`;
+          await database
+            .delete(pushSubscriptions)
+            .where(eq(pushSubscriptions.endpoint, entry.endpoint));
         }
         throw error;
       }

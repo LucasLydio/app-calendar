@@ -1,58 +1,51 @@
-import { neon } from '@neondatabase/serverless';
+import { eq } from 'drizzle-orm';
+import { db } from '../../../db/index.ts';
+import { availability, pushSubscriptions } from '../../../db/schema.ts';
 
-let sql;
-
-export function getSql() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL must be configured for Netlify Functions.');
-  }
-  sql ||= neon(process.env.DATABASE_URL);
-  return sql;
-}
+export { db };
 
 export function appointmentFromRow(row) {
   return {
     id: row.id,
-    userId: row.user_id,
-    name: row.customer_name,
-    email: row.customer_email,
+    userId: row.userId,
+    name: row.customerName,
+    email: row.customerEmail,
     service: row.service,
-    date: String(row.appointment_date).slice(0, 10),
-    time: String(row.appointment_time).slice(0, 5),
+    date: String(row.requestedDate).slice(0, 10),
+    time: String(row.requestedTime).slice(0, 5),
     status: row.status,
-    calendarSyncStatus: row.calendar_sync_status,
-    ...(row.calendar_sync_error && {
-      calendarSyncError: row.calendar_sync_error,
+    calendarSyncStatus: row.calendarSyncStatus,
+    ...(row.calendarSyncError && {
+      calendarSyncError: row.calendarSyncError,
     }),
-    ...(row.calendar_synced_at && {
-      calendarSyncedAt: new Date(row.calendar_synced_at).toISOString(),
+    ...(row.calendarSyncedAt && {
+      calendarSyncedAt: new Date(row.calendarSyncedAt).toISOString(),
     }),
-    ...(row.google_event_id && { googleEventId: row.google_event_id }),
-    ...(row.rejection_reason && { rejectionReason: row.rejection_reason }),
-    createdAt: new Date(row.created_at).toISOString(),
-    ...(row.decided_at && {
-      decidedAt: new Date(row.decided_at).toISOString(),
+    ...(row.googleEventId && { googleEventId: row.googleEventId }),
+    ...(row.rejectionReason && { rejectionReason: row.rejectionReason }),
+    createdAt: new Date(row.createdAt).toISOString(),
+    ...(row.decidedAt && {
+      decidedAt: new Date(row.decidedAt).toISOString(),
     }),
   };
 }
 
-export async function getAvailability(sql = getSql()) {
-  const rows = await sql`
-    SELECT time_zone, weekly_slots
-    FROM manager_availability
-    WHERE singleton_id = 1
-  `;
-  if (!rows[0])
+export async function getAvailability(database = db) {
+  const [row] = await database.select().from(availability).limit(1);
+  if (!row)
     throw new Error(
-      'Availability is not initialized. Run the database migration.',
+      'Availability is missing from the Netlify Database schema.',
     );
-  return { timeZone: rows[0].time_zone, weeklySlots: rows[0].weekly_slots };
+  return { timeZone: row.timeZone, weeklySlots: row.weeklySlots };
 }
 
-export async function getSubscriptionsForUser(userId, sql = getSql()) {
-  return sql`
-    SELECT endpoint, subscription
-    FROM push_subscriptions
-    WHERE user_id = ${userId}
-  `;
+export async function getSubscriptionsForUser(userId, database = db) {
+  const rows = await database
+    .select()
+    .from(pushSubscriptions)
+    .where(eq(pushSubscriptions.userId, userId));
+  return rows.map((row) => ({
+    endpoint: row.endpoint,
+    subscription: { endpoint: row.endpoint, keys: row.keys },
+  }));
 }
