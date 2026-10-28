@@ -1,11 +1,13 @@
-import { appointmentFromRow, getAvailability, getSql } from './lib/db.mjs';
 import { buildIcsCalendar } from './lib/calendar.mjs';
+import { appointmentFromRow, getAvailability, getSql } from './lib/db.mjs';
 import { errorResponse, jsonResponse } from './lib/http.mjs';
 
 export default async function handler(request) {
   try {
     if (request.method !== 'GET') {
-      return jsonResponse({ error: 'Method not allowed.' }, 405, { Allow: 'GET' });
+      return jsonResponse({ error: 'Method not allowed.' }, 405, {
+        Allow: 'GET',
+      });
     }
     const id = new URL(request.url).searchParams.get('id');
     if (!id) return jsonResponse({ error: 'Appointment ID is required.' }, 400);
@@ -13,7 +15,10 @@ export default async function handler(request) {
     const rows = await sql`SELECT * FROM appointments WHERE id = ${id}`;
     if (!rows[0]) return jsonResponse({ error: 'Appointment not found.' }, 404);
     if (rows[0].status !== 'approved') {
-      return jsonResponse({ error: 'Only approved appointments can be exported.' }, 409);
+      return jsonResponse(
+        { error: 'Only approved appointments can be exported.' },
+        409,
+      );
     }
 
     const appointment = appointmentFromRow(rows[0]);

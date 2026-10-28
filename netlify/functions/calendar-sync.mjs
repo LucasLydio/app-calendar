@@ -1,5 +1,5 @@
-import { getAvailability, getSql } from './lib/db.mjs';
 import { buildGoogleEventPayload, googleEventId } from './lib/calendar.mjs';
+import { getAvailability, getSql } from './lib/db.mjs';
 
 const BATCH_SIZE = 3;
 const MAX_ATTEMPTS = Number(process.env.CALENDAR_WORKER_MAX_ATTEMPTS) || 5;
@@ -13,9 +13,12 @@ async function getAccessToken() {
     process.env.GOOGLE_REFRESH_TOKEN,
   ];
   if (values.some((value) => !value)) {
-    throw Object.assign(new Error('Google Calendar OAuth credentials are not configured.'), {
-      transient: false,
-    });
+    throw Object.assign(
+      new Error('Google Calendar OAuth credentials are not configured.'),
+      {
+        transient: false,
+      },
+    );
   }
   let response;
   try {
@@ -31,15 +34,27 @@ async function getAccessToken() {
       signal: AbortSignal.timeout(7000),
     });
   } catch (error) {
-    throw Object.assign(new Error(`Google OAuth request failed: ${error.message}`), {
-      transient: true,
-    });
+    throw Object.assign(
+      new Error(`Google OAuth request failed: ${error.message}`),
+      {
+        transient: true,
+      },
+    );
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.access_token) {
     throw Object.assign(
-      new Error(payload.error_description || payload.error || `OAuth returned HTTP ${response.status}.`),
-      { transient: response.status === 408 || response.status === 429 || response.status >= 500 },
+      new Error(
+        payload.error_description ||
+          payload.error ||
+          `OAuth returned HTTP ${response.status}.`,
+      ),
+      {
+        transient:
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500,
+      },
     );
   }
   return payload.access_token;
@@ -50,7 +65,9 @@ function isTransientStatus(status) {
 }
 
 async function syncGoogleAppointment(appointment, timeZone, accessToken) {
-  const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID || 'primary');
+  const calendarId = encodeURIComponent(
+    process.env.GOOGLE_CALENDAR_ID || 'primary',
+  );
   const eventId = googleEventId(appointment.id);
   const base = `${GOOGLE_API}/calendars/${calendarId}/events`;
   const headers = { Authorization: `Bearer ${accessToken}` };
@@ -61,19 +78,32 @@ async function syncGoogleAppointment(appointment, timeZone, accessToken) {
       signal: AbortSignal.timeout(7000),
     });
   } catch (error) {
-    throw Object.assign(new Error(`Google Calendar lookup failed: ${error.message}`), {
-      transient: true,
-    });
+    throw Object.assign(
+      new Error(`Google Calendar lookup failed: ${error.message}`),
+      {
+        transient: true,
+      },
+    );
   }
   if (response.ok) return { id: eventId };
   if (response.status !== 404) {
     const payload = await response.json().catch(() => ({}));
-    throw Object.assign(new Error(payload.error?.message || `Google Calendar returned HTTP ${response.status}.`), {
-      transient: isTransientStatus(response.status),
-    });
+    throw Object.assign(
+      new Error(
+        payload.error?.message ||
+          `Google Calendar returned HTTP ${response.status}.`,
+      ),
+      {
+        transient: isTransientStatus(response.status),
+      },
+    );
   }
 
-  const event = buildGoogleEventPayload(appointment, timeZone, Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60);
+  const event = buildGoogleEventPayload(
+    appointment,
+    timeZone,
+    Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60,
+  );
   try {
     response = await fetch(base, {
       method: 'POST',
@@ -82,15 +112,24 @@ async function syncGoogleAppointment(appointment, timeZone, accessToken) {
       signal: AbortSignal.timeout(7000),
     });
   } catch (error) {
-    throw Object.assign(new Error(`Google Calendar insert failed: ${error.message}`), {
-      transient: true,
-    });
+    throw Object.assign(
+      new Error(`Google Calendar insert failed: ${error.message}`),
+      {
+        transient: true,
+      },
+    );
   }
   if (response.ok || response.status === 409) return { id: eventId };
   const payload = await response.json().catch(() => ({}));
-  throw Object.assign(new Error(payload.error?.message || `Google Calendar returned HTTP ${response.status}.`), {
-    transient: isTransientStatus(response.status),
-  });
+  throw Object.assign(
+    new Error(
+      payload.error?.message ||
+        `Google Calendar returned HTTP ${response.status}.`,
+    ),
+    {
+      transient: isTransientStatus(response.status),
+    },
+  );
 }
 
 async function claimJobs(sql) {
@@ -169,39 +208,61 @@ async function markFailed(sql, job, appointment, error) {
         calendar_sync_error = ${message}
     WHERE id = ${appointment.id} AND status = 'approved'
   `;
-  console.error(`Calendar sync job ${job.job_id} failed on attempt ${job.attempts}: ${message}`);
+  console.error(
+    `Calendar sync job ${job.job_id} failed on attempt ${job.attempts}: ${message}`,
+  );
 }
 
 export default async function handler() {
   const sql = getSql();
   try {
     const jobs = await claimJobs(sql);
-    if (!jobs.length) return new Response('No calendar sync jobs due.', { status: 200 });
+    if (!jobs.length)
+      return new Response('No calendar sync jobs due.', { status: 200 });
     const availability = await getAvailability(sql);
     let accessToken;
     try {
       accessToken = await getAccessToken();
     } catch (error) {
-      await Promise.all(jobs.map((job) => markFailed(sql, job, appointmentFromJob(job), error)));
-      return new Response(`Processed ${jobs.length} calendar sync job(s).`, { status: 200 });
+      await Promise.all(
+        jobs.map((job) => markFailed(sql, job, appointmentFromJob(job), error)),
+      );
+      return new Response(`Processed ${jobs.length} calendar sync job(s).`, {
+        status: 200,
+      });
     }
 
-    await Promise.all(jobs.map(async (job) => {
-      const appointment = appointmentFromJob(job);
-      if (appointment.status !== 'approved') {
-        await markFailed(sql, job, appointment, new Error('Only approved appointments can be synced.'));
-        return;
-      }
-      try {
-        const event = await syncGoogleAppointment(appointment, availability.timeZone, accessToken);
-        await markSynced(sql, job, appointment, event.id);
-      } catch (error) {
-        await markFailed(sql, job, appointment, error);
-      }
-    }));
-    return new Response(`Processed ${jobs.length} calendar sync job(s).`, { status: 200 });
+    await Promise.all(
+      jobs.map(async (job) => {
+        const appointment = appointmentFromJob(job);
+        if (appointment.status !== 'approved') {
+          await markFailed(
+            sql,
+            job,
+            appointment,
+            new Error('Only approved appointments can be synced.'),
+          );
+          return;
+        }
+        try {
+          const event = await syncGoogleAppointment(
+            appointment,
+            availability.timeZone,
+            accessToken,
+          );
+          await markSynced(sql, job, appointment, event.id);
+        } catch (error) {
+          await markFailed(sql, job, appointment, error);
+        }
+      }),
+    );
+    return new Response(`Processed ${jobs.length} calendar sync job(s).`, {
+      status: 200,
+    });
   } catch (error) {
     console.error('Scheduled calendar sync failed:', error);
-    return new Response('Calendar sync failed; due jobs will be retried.', { status: 500 });
+    return new Response('Calendar sync failed; due jobs will be retried.', {
+      status: 500,
+    });
   }
 }

@@ -52,7 +52,10 @@ function appointmentDateTime(appointment, durationMinutes, timeZone) {
 }
 
 function icsDate(date) {
-  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  return date
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
 }
 
 function foldLine(line) {
@@ -75,7 +78,11 @@ function foldLine(line) {
 }
 
 export function buildIcsCalendar(appointment, timeZone, durationMinutes) {
-  const { start, end } = appointmentDateTime(appointment, durationMinutes, timeZone);
+  const { start, end } = appointmentDateTime(
+    appointment,
+    durationMinutes,
+    timeZone,
+  );
   const uid = `${deterministicEventId(appointment.id)}@app-calendar`;
   const lines = [
     'BEGIN:VCALENDAR',
@@ -97,8 +104,16 @@ export function buildIcsCalendar(appointment, timeZone, durationMinutes) {
   return `${lines.map(foldLine).join('\r\n')}\r\n`;
 }
 
-export function buildGoogleEventPayload(appointment, timeZone, durationMinutes) {
-  const { start, end } = appointmentDateTime(appointment, durationMinutes, timeZone);
+export function buildGoogleEventPayload(
+  appointment,
+  timeZone,
+  durationMinutes,
+) {
+  const { start, end } = appointmentDateTime(
+    appointment,
+    durationMinutes,
+    timeZone,
+  );
   return {
     id: deterministicEventId(appointment.id),
     summary: `${appointment.service} - ${appointment.name}`,

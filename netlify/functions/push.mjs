@@ -8,7 +8,9 @@ export default async function handler(request) {
       return jsonResponse({ publicKey: getVapidPublicKey() });
     }
     if (request.method !== 'POST') {
-      return jsonResponse({ error: 'Method not allowed.' }, 405, { Allow: 'GET, POST' });
+      return jsonResponse({ error: 'Method not allowed.' }, 405, {
+        Allow: 'GET, POST',
+      });
     }
     const body = await readJson(request);
     const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
@@ -21,7 +23,10 @@ export default async function handler(request) {
       typeof subscription.keys?.p256dh !== 'string' ||
       typeof subscription.keys?.auth !== 'string'
     ) {
-      return jsonResponse({ error: 'A valid Web Push subscription is required.' }, 400);
+      return jsonResponse(
+        { error: 'A valid Web Push subscription is required.' },
+        400,
+      );
     }
     await savePushSubscription({ userId, subscription }, getSql());
     return jsonResponse({ userId }, 201);

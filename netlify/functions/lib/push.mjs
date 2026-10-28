@@ -1,5 +1,5 @@
 import webPush from 'web-push';
-import { getSubscriptionsForUser, getSql } from './db.mjs';
+import { getSql, getSubscriptionsForUser } from './db.mjs';
 
 let vapidConfigured = false;
 
@@ -7,7 +7,9 @@ export function getVapidPublicKey() {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
   if (!publicKey || !privateKey) {
-    throw new Error('VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be configured.');
+    throw new Error(
+      'VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be configured.',
+    );
   }
   if (!vapidConfigured) {
     webPush.setVapidDetails(
@@ -20,7 +22,10 @@ export function getVapidPublicKey() {
   return publicKey;
 }
 
-export async function savePushSubscription({ userId, subscription }, sql = getSql()) {
+export async function savePushSubscription(
+  { userId, subscription },
+  sql = getSql(),
+) {
   await sql`
     INSERT INTO push_subscriptions (endpoint, user_id, subscription)
     VALUES (${subscription.endpoint}, ${userId}, ${JSON.stringify(subscription)}::jsonb)
@@ -39,7 +44,8 @@ export async function sendAppointmentPush(appointment, status, sql = getSql()) {
   getVapidPublicKey();
   const subscriptions = await getSubscriptionsForUser(appointment.userId, sql);
   const payload = JSON.stringify({
-    title: status === 'approved' ? 'Appointment approved' : 'Appointment update',
+    title:
+      status === 'approved' ? 'Appointment approved' : 'Appointment update',
     body:
       status === 'approved'
         ? `Your ${appointment.service} on ${appointment.date} at ${appointment.time} was approved.`

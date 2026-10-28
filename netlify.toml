@@ -5,9 +5,6 @@
 
 [build.environment]
   NODE_VERSION = "22"
-  CALENDAR_APPOINTMENT_DURATION_MINUTES = "60"
-  CALENDAR_WORKER_MAX_ATTEMPTS = "5"
-  GOOGLE_CALENDAR_ID = "primary"
 
 [functions]
   node_bundler = "esbuild"

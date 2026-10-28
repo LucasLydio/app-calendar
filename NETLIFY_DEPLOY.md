@@ -2,7 +2,7 @@
 
 ## Required environment variables
 
-Configure these in Netlify site settings or with `netlify env:set`; do not commit secret values:
+In Netlify, open **Site configuration > Environment variables** (sometimes shown as **Site settings > Environment variables**) and add the following variables. Set their scope to **Functions**; add **Builds** only if a build step needs a variable. Do not put secret values in `netlify.toml` or commit them:
 
 - `DATABASE_URL`: Neon Postgres connection string.
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`: Web Push VAPID key pair.
@@ -10,6 +10,10 @@ Configure these in Netlify site settings or with `netlify env:set`; do not commi
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`: Google Calendar OAuth credentials.
 
 Optional values and defaults are in `netlify.toml`. `GOOGLE_CALENDAR_ID` defaults to `primary` and appointment duration defaults to 60 minutes.
+
+For CLI setup, link the local repository with `netlify link`, then use `netlify env:set KEY VALUE --scope functions --context production --secret` for secret values. Avoid placing literal secret values in scripts, committed files, or shared terminal transcripts. You can also import a local dotenv file with `netlify env:import .env.local`; the file is ignored by Git, but verify the imported values and scopes in the Netlify dashboard.
+
+After changing environment variables, trigger a new deploy so the deployed functions receive the updated values. Function code reads them using `process.env.*`; Netlify configuration-file environment values are build-time only and are not injected into function runtime.
 
 ## Initialize and run
 

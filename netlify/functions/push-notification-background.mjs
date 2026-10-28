@@ -1,6 +1,6 @@
-import { getSubscriptionsForUser, getSql } from './lib/db.mjs';
-import { getVapidPublicKey } from './lib/push.mjs';
 import webPush from 'web-push';
+import { getSql, getSubscriptionsForUser } from './lib/db.mjs';
+import { getVapidPublicKey } from './lib/push.mjs';
 
 export default async function handler(request) {
   const expectedToken = process.env.INTERNAL_FUNCTION_TOKEN;
@@ -22,9 +22,13 @@ export default async function handler(request) {
     }
     getVapidPublicKey();
     const sql = getSql();
-    const subscriptions = await getSubscriptionsForUser(appointment.userId, sql);
+    const subscriptions = await getSubscriptionsForUser(
+      appointment.userId,
+      sql,
+    );
     const payload = JSON.stringify({
-      title: status === 'approved' ? 'Appointment approved' : 'Appointment update',
+      title:
+        status === 'approved' ? 'Appointment approved' : 'Appointment update',
       body:
         status === 'approved'
           ? `Your ${appointment.service} on ${appointment.date} at ${appointment.time} was approved.`
@@ -45,9 +49,13 @@ export default async function handler(request) {
         }
       }),
     );
-    const failed = results.filter((result) => result.status === 'rejected').length;
+    const failed = results.filter(
+      (result) => result.status === 'rejected',
+    ).length;
     if (failed) {
-      console.error(`Push delivery failed for ${failed} subscription(s) on ${appointment.id}.`);
+      console.error(
+        `Push delivery failed for ${failed} subscription(s) on ${appointment.id}.`,
+      );
     }
     return new Response('Push notifications processed.', { status: 200 });
   } catch (error) {

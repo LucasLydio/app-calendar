@@ -5,22 +5,32 @@ import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 export default async function handler(request) {
   try {
     if (request.method !== 'POST') {
-      return jsonResponse({ error: 'Method not allowed.' }, 405, { Allow: 'POST' });
+      return jsonResponse({ error: 'Method not allowed.' }, 405, {
+        Allow: 'POST',
+      });
     }
     const url = new URL(request.url);
     const appointmentId = url.searchParams.get('id');
     const action = url.searchParams.get('action');
     if (!appointmentId || !['approve', 'reject'].includes(action)) {
-      return jsonResponse({ error: 'Appointment ID and approve/reject action are required.' }, 400);
+      return jsonResponse(
+        { error: 'Appointment ID and approve/reject action are required.' },
+        400,
+      );
     }
 
     const body = await readJson(request);
-    if (action === 'reject' && body.reason !== undefined && typeof body.reason !== 'string') {
+    if (
+      action === 'reject' &&
+      body.reason !== undefined &&
+      typeof body.reason !== 'string'
+    ) {
       return jsonResponse({ error: 'reason must be a string.' }, 400);
     }
     const sql = getSql();
     const decision = action === 'approve' ? 'approved' : 'rejected';
-    const rejectionReason = action === 'reject' ? body.reason?.trim() || null : null;
+    const rejectionReason =
+      action === 'reject' ? body.reason?.trim() || null : null;
     const outboxId = crypto.randomUUID();
     const changed = await sql`
       WITH updated AS (
@@ -40,9 +50,14 @@ export default async function handler(request) {
     `;
 
     if (!changed[0]) {
-      const existing = await sql`SELECT status FROM appointments WHERE id = ${appointmentId}`;
-      if (!existing[0]) return jsonResponse({ error: 'Appointment not found.' }, 404);
-      return jsonResponse({ error: `Appointment is already ${existing[0].status}.` }, 409);
+      const existing =
+        await sql`SELECT status FROM appointments WHERE id = ${appointmentId}`;
+      if (!existing[0])
+        return jsonResponse({ error: 'Appointment not found.' }, 404);
+      return jsonResponse(
+        { error: `Appointment is already ${existing[0].status}.` },
+        409,
+      );
     }
 
     const appointment = appointmentFromRow(changed[0]);
@@ -65,10 +80,15 @@ export default async function handler(request) {
         });
         push = { queued: dispatch.status === 202 };
       } catch (error) {
-        console.error(`Could not queue push notification for ${appointment.id}:`, error);
+        console.error(
+          `Could not queue push notification for ${appointment.id}:`,
+          error,
+        );
       }
     } else {
-      console.error('INTERNAL_FUNCTION_TOKEN is not configured; push notification was not queued.');
+      console.error(
+        'INTERNAL_FUNCTION_TOKEN is not configured; push notification was not queued.',
+      );
     }
     return jsonResponse({
       appointment,

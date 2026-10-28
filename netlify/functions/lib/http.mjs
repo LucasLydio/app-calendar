@@ -14,14 +14,19 @@ export async function readJson(request) {
     const body = await request.text();
     return body ? JSON.parse(body) : {};
   } catch {
-    throw Object.assign(new Error('Invalid JSON request body.'), { status: 400 });
+    throw Object.assign(new Error('Invalid JSON request body.'), {
+      status: 400,
+    });
   }
 }
 
 export function errorResponse(error) {
   if (error?.code === '23505') {
     return jsonResponse(
-      { error: 'That time was just booked. Please choose another available time.' },
+      {
+        error:
+          'That time was just booked. Please choose another available time.',
+      },
       409,
     );
   }

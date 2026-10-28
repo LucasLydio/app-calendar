@@ -7,7 +7,12 @@ const publishDir = path.join(root, 'public');
 
 await rm(publishDir, { recursive: true, force: true });
 await mkdir(publishDir, { recursive: true });
-for (const file of ['index.html', 'book.html', 'service-worker.js', '_redirects']) {
+for (const file of [
+  'index.html',
+  'book.html',
+  'service-worker.js',
+  '_redirects',
+]) {
   await cp(path.join(root, file), path.join(publishDir, file));
 }
 console.log('Copied static frontend files to public/.');
