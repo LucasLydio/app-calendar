@@ -4,7 +4,24 @@ import { appointments } from '../../db/schema.ts';
 import { appointmentFromRow, db, getAvailability } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 
-const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const DAYS = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+const LEGACY_DAYS = {
+  sun: 'Sunday',
+  mon: 'Monday',
+  tue: 'Tuesday',
+  wed: 'Wednesday',
+  thu: 'Thursday',
+  fri: 'Friday',
+  sat: 'Saturday',
+};
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DURATION_MINUTES =
   Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60;
@@ -34,16 +51,30 @@ function futureInZone(date, time, timeZone) {
 function slotIsAvailable(weeklySlots, date, time) {
   const day = DAYS[new Date(`${date}T00:00:00.000Z`).getUTCDay()];
   const requestedStart = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-  return weeklySlots.some((slot) => {
-    if (slot.day !== day) return false;
+  return (Array.isArray(weeklySlots) ? weeklySlots : []).some((slot) => {
+    const slotDay = LEGACY_DAYS[slot.day] || slot.day;
+    if (slotDay !== day || slot.active === false) return false;
     const slotStart =
       Number(slot.start.slice(0, 2)) * 60 + Number(slot.start.slice(3));
     const slotEnd =
       Number(slot.end.slice(0, 2)) * 60 + Number(slot.end.slice(3));
+    const requestedEnd = requestedStart + DURATION_MINUTES;
+    const overlapsBlackout = (Array.isArray(slot.blackout)
+      ? slot.blackout
+      : []
+    ).some((period) => {
+      const [start, end] = period.split('-');
+      const blackoutStart =
+        Number(start.slice(0, 2)) * 60 + Number(start.slice(3));
+      const blackoutEnd =
+        Number(end.slice(0, 2)) * 60 + Number(end.slice(3));
+      return requestedStart < blackoutEnd && blackoutStart < requestedEnd;
+    });
     return (
       requestedStart >= slotStart &&
-      requestedStart + DURATION_MINUTES <= slotEnd &&
-      (requestedStart - slotStart) % DURATION_MINUTES === 0
+      requestedEnd <= slotEnd &&
+      (requestedStart - slotStart) % DURATION_MINUTES === 0 &&
+      !overlapsBlackout
     );
   });
 }
@@ -53,8 +84,12 @@ export default async function handler(request) {
     const url = new URL(request.url);
 
     if (request.method === 'GET') {
-      if (url.searchParams.get('view') === 'slots') {
-        const date = url.searchParams.get('date');
+      const requestedDate = url.searchParams.get('date');
+      const slotView =
+        url.searchParams.get('view') === 'slots' ||
+        (requestedDate && !url.searchParams.has('status'));
+      if (slotView) {
+        const date = requestedDate;
         if (!isValidDate(date)) {
           return jsonResponse(
             { error: 'A valid date (YYYY-MM-DD) is required.' },
@@ -70,10 +105,12 @@ export default async function handler(request) {
               inArray(appointments.status, ['pending', 'approved']),
             ),
           );
-        return jsonResponse({
-          bookedSlots: bookedRows.map((row) =>
+        const bookedSlots = (Array.isArray(bookedRows) ? bookedRows : []).map(
+          (row) =>
             String(row.requestedTime).slice(0, 5),
-          ),
+        );
+        return jsonResponse({
+          bookedSlots,
         });
       }
       const status = url.searchParams.get('status') || 'pending';
@@ -93,7 +130,9 @@ export default async function handler(request) {
       if (status !== 'all')
         query = query.where(eq(appointments.status, status));
       const rows = await query;
-      return jsonResponse({ appointments: rows.map(appointmentFromRow) });
+      return jsonResponse({
+        appointments: (Array.isArray(rows) ? rows : []).map(appointmentFromRow),
+      });
     }
 
     if (request.method !== 'POST') {

@@ -14,9 +14,18 @@ import {
 import { sql } from 'drizzle-orm';
 
 export type WeeklySlot = {
-  day: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+  day:
+    | 'Monday'
+    | 'Tuesday'
+    | 'Wednesday'
+    | 'Thursday'
+    | 'Friday'
+    | 'Saturday'
+    | 'Sunday';
+  active: boolean;
   start: string;
   end: string;
+  blackout: string[];
 };
 
 export const availability = pgTable(

@@ -6,7 +6,7 @@ Daybook is a serverless appointment-management and booking MVP. The deployed pro
 
 The deployed architecture is:
 
-- **Frontend:** static `index.html` management interface and `book.html` public booking page. Both currently contain their CSS and JavaScript inline; there is no root `script.js` or `styles.css` at present. `service-worker.js` supports browser push notifications.
+- **Frontend:** static `index.html` management interface, `book.html` public booking page, and `time.html` availability-management page. Admin pages use a responsive sticky top navigation bar with Appointments and Availability links; the public booking page intentionally has no navigation or header controls. Shared tokens and dashboard styles are in `styles.css`; page behavior/styles are split into root-level CSS and JavaScript files. `service-worker.js` supports browser push notifications.
 - **Backend:** ES-module Netlify Functions in `netlify/functions/`, bundled by esbuild. `netlify.toml` maps public `/api/*` paths to function endpoints and serves the static site from `public/`.
 - **Database:** Supabase Postgres accessed through Drizzle ORM and the `postgres` (postgres.js) driver.
 - **Legacy/local server:** `server.js` and `calendar_worker.js` are retained for local/legacy development. Netlify publishes the static pages and functions; do not assume the Express server is the deployed API.
@@ -16,7 +16,7 @@ Keep deployed functions and the legacy Express implementation distinct unless a 
 
 ## 2. Tech Stack & Core Dependencies
 
-- **Frontend:** Vanilla HTML/CSS/JavaScript; static pages are `index.html` and `book.html`; service worker is `service-worker.js`.
+- **Frontend:** Vanilla HTML/CSS/JavaScript; static pages are `index.html`, `book.html`, and `time.html`; service worker is `service-worker.js`.
 - **Backend:** Netlify Functions (`netlify/functions/*.mjs`) using ES-module default exports and Web `Request`/`Response` APIs.
 - **Database/ORM:** Supabase Postgres, `drizzle-orm/postgres-js`, `postgres` (postgres.js), schema in `db/schema.ts`.
 - **Migration tooling:** `drizzle-kit`, config in `drizzle.config.ts`; generated migrations are under `drizzle/`.
@@ -57,7 +57,7 @@ Drizzle migrations need a session-capable connection for migration locking. Set 
 
 ### Tables
 
-- `availability`: singleton row (`singleton_id = 1`), IANA time zone, JSON weekly slots, update timestamp. The function returns UTC weekdays 09:00–17:00 as a fallback if the table is empty, but the table must exist.
+- `availability`: singleton row (`singleton_id = 1`), IANA time zone, JSON weekly slots, update timestamp. Each weekly slot uses `{ "day": "Monday", "active": true, "start": "09:00", "end": "17:00", "blackout": ["12:00-13:00"] }`. All seven days are represented; inactive days remain stored with `active: false`. The function normalizes legacy short day keys on read.
 - `appointments`: customer and user IDs, service, date/time, status (`pending`, `approved`, `rejected`), calendar-sync state/error/event metadata, and decision/creation timestamps. Active appointments have a partial unique index on date/time.
 - `push_subscriptions`: browser ID, unique push endpoint, JSON Web Push keys, user ID, timestamps.
 - `calendar_outbox`: queued calendar actions with status, attempts, retry time, lock, error, event ID, and appointment foreign key.
@@ -67,10 +67,11 @@ Drizzle migrations need a session-capable connection for migration locking. Set 
 Routes are configured in `netlify.toml`. Netlify function handlers use ES-module default exports; do not mix V1 `exports.handler` syntax into these functions. JSON routes use helpers in `netlify/functions/lib/http.mjs`. Server errors are logged with nested causes and return a generic public message; avoid exposing SQL, credentials, or internal exception details to callers.
 
 - **`GET /api/health`** -> `health.mjs`; does not access the database. Returns `{"status":"ok"}`.
-- **`GET /api/availability`** -> returns `{"availability":{"timeZone":"...","weeklySlots":[...]}}`; if no row exists it returns the default UTC weekdays 09:00–17:00.
-- **`PUT /api/availability`** -> body `{ "timeZone": "Area/Location", "weeklySlots": [{"day":"mon","start":"09:00","end":"17:00"}] }`; validates IANA timezone and slot fields, upserts singleton row, returns the saved availability.
+- **`GET /api/availability`** -> returns `{"availability":{"timeZone":"...","weeklySlots":[],"disabledDates":[],"blackoutHours":[]}}`; array fields are always defined. If no row exists it returns all seven days with UTC weekdays active from 09:00–17:00.
+- **`POST|PUT /api/availability`** -> body `{ "timeZone": "Area/Location", "weeklySlots": [{"day":"Monday","active":true,"start":"09:00","end":"17:00","blackout":["12:00-13:00"]}] }`; validates the IANA timezone, unique weekdays, time ranges, and blackout periods, upserts the singleton row, and returns the normalized saved availability. Legacy short weekday keys remain accepted during transition.
+- **`GET /time`** -> serves `time.html`, the manager availability editor. The build copies `time.html`, `time.css`, and `time.js` into `public/`.
 - **`GET /api/appointments?status=pending|approved|rejected|all`** -> returns `{ "appointments": [...] }`; status defaults to `pending`. This is a manager-facing listing and must not be publicly exposed without manager authentication.
-- **`GET /api/appointments?view=slots&date=YYYY-MM-DD`** -> returns `{ "bookedSlots": ["HH:mm", ...] }` for pending/approved bookings.
+- **`GET /api/appointments?view=slots&date=YYYY-MM-DD`** (also accepts `?date=YYYY-MM-DD`) -> always returns `{ "bookedSlots": ["HH:mm", ...] }` for pending/approved bookings, including an empty array when none exist.
 - **`POST /api/appointments`** -> booking body requires `{ "name", "email", "date": "YYYY-MM-DD", "time": "HH:mm" }`; optional `userId`. Creates a pending consultation and returns `{ "appointment": {...}, "userId": "..." }` with HTTP 201. Enforces configured availability, future date/time, and unique active slots.
 - **`POST /api/appointments/:id/approve`** -> marks a pending appointment approved and queues a calendar outbox job; response includes appointment, `calendarSync: "queued"`, and push queue status. The function also accepts its rewritten `id` and `action` query parameters.
 - **`POST /api/appointments/:id/reject`** -> optional body `{ "reason": "..." }`; marks a pending appointment rejected and returns the appointment and push queue status.
@@ -116,6 +117,7 @@ Never hardcode or commit secret values, include them in logs, or copy values fro
 ### Implemented
 
 - Netlify DB adapter was removed in favor of Supabase Postgres, Drizzle ORM, and postgres.js.
+- The former admin sidebar was replaced by a sharp-edged, sticky top navigation bar on `index.html` and `time.html`; `book.html` remains an isolated client booking flow without navigation.
 - Transaction-pooler compatibility guards are in `db/index.ts` (`prepare: false`, SSL required, one connection); client timeouts are configured.
 - Drizzle migration config and generated SQL are in place; migration CLI prefers `MIGRATION_DATABASE_URL`.
 - Netlify handlers use ES module default exports. Shared error handling logs server-side causes and returns safe JSON errors.
@@ -130,7 +132,7 @@ Never hardcode or commit secret values, include them in logs, or copy values fro
 - **Production endpoints:** after deploy, test `/api/health`, `/api/availability`, public booking in `book.html`, appointment listing/actions only after authorization is addressed, and push subscription/delivery.
 - **Push:** test subscription and notifications across supported browsers; verify VAPID values and the internal dispatch token in Netlify.
 - **Calendar outbox:** scheduled worker is configured once per minute; verify actual retries and successful Google Calendar sync in production.
-- **Frontend extraction:** the requested HTML/CSS/JS separation is not complete in the current repository. Both `index.html` and `book.html` still have inline CSS/JS; there are no `styles.css` or `script.js` files. Extract only as a separate task, preserving page behavior.
+- **Availability UI:** verify `/time` against the deployed database, including custom day hours, blackout periods, direct navigation, and narrow-screen layouts.
 - **Authorization:** implement and test manager authentication before relying on manager endpoints in production.
 
 For production diagnostics, use **Netlify Dashboard > Functions > [function name] > Logs**. Confirm that environment-variable edits are followed by a new deploy.

@@ -14,6 +14,9 @@ for (const file of [
   'book.html',
   'book.css',
   'book.js',
+  'time.html',
+  'time.css',
+  'time.js',
   'service-worker.js',
   '_redirects',
 ]) {

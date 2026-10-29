@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#eff2f1" />
+    <title>Availability | Daybook</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="time.css" />
+    <script src="time.js" defer></script>
+  </head>
+  <body>
+    <header class="admin-header">
+      <nav class="top-nav" aria-label="Primary navigation">
+        <a class="top-nav-brand" href="/" aria-label="Daybook appointments">
+          <span class="brand-mark" aria-hidden="true">D</span>
+          <span class="brand-name">daybook</span>
+        </a>
+        <div class="top-nav-links">
+          <a class="nav-link" href="/">Appointments</a>
+          <a class="nav-link active" href="/time" aria-current="page"
+            >Availability</a
+          >
+        </div>
+      </nav>
+    </header>
+    <div class="app-shell time-shell">
+      <main class="workspace time-workspace">
+        <header class="topbar">
+          <div class="breadcrumb">
+            Workspace <span aria-hidden="true">/</span>
+            <strong>Availability</strong>
+          </div>
+          <a class="button button-quiet" href="/">Back to dashboard</a>
+        </header>
+
+        <header class="time-heading">
+          <p class="eyebrow">Weekly hours</p>
+          <h1>Availability</h1>
+          <p>Choose the days and hours clients can request.</p>
+        </header>
+
+        <form id="availability-form" class="availability-layout" novalidate>
+          <section class="time-card" aria-labelledby="working-days-title">
+            <div class="time-card-header">
+              <div>
+                <p class="eyebrow">Schedule</p>
+                <h2 id="working-days-title">Working days</h2>
+              </div>
+              <span class="status-copy" id="load-status" role="status"
+                >Loading schedule…</span
+              >
+            </div>
+            <fieldset class="time-day-list">
+              <legend class="visually-hidden">Select working days</legend>
+              <label class="time-day-row">
+                <input type="checkbox" name="working-day" value="Monday" />
+                <span>Monday</span><small>Mon</small>
+              </label>
+              <label class="time-day-row">
+                <input type="checkbox" name="working-day" value="Tuesday" />
+                <span>Tuesday</span><small>Tue</small>
+              </label>
+              <label class="time-day-row">
+                <input type="checkbox" name="working-day" value="Wednesday" />
+                <span>Wednesday</span><small>Wed</small>
+              </label>
+              <label class="time-day-row">
+                <input type="checkbox" name="working-day" value="Thursday" />
+                <span>Thursday</span><small>Thu</small>
+              </label>
+              <label class="time-day-row">
+                <input type="checkbox" name="working-day" value="Friday" />
+                <span>Friday</span><small>Fri</small>
+              </label>
+              <label class="time-day-row">
+                <input type="checkbox" name="working-day" value="Saturday" />
+                <span>Saturday</span><small>Sat</small>
+              </label>
+              <label class="time-day-row">
+                <input type="checkbox" name="working-day" value="Sunday" />
+                <span>Sunday</span><small>Sun</small>
+              </label>
+            </fieldset>
+          </section>
+
+          <section class="time-card hours-card" aria-labelledby="hours-title">
+            <div class="time-card-header">
+              <div>
+                <p class="eyebrow">Default schedule</p>
+                <h2 id="hours-title">Operating hours</h2>
+              </div>
+              <span class="zone-label" id="time-zone">UTC</span>
+            </div>
+
+            <div class="default-hours">
+              <label class="time-input-group">
+                <span>Default start</span>
+                <span class="time-input-wrap">
+                  <span aria-hidden="true">&#9719;</span>
+                  <input id="default-start" type="time" value="09:00" required />
+                </span>
+              </label>
+              <label class="time-input-group">
+                <span>Default end</span>
+                <span class="time-input-wrap">
+                  <span aria-hidden="true">&#9719;</span>
+                  <input id="default-end" type="time" value="17:00" required />
+                </span>
+              </label>
+            </div>
+
+            <details class="custom-hours" id="custom-hours">
+              <summary>
+                <span>Custom Hours per Day</span>
+                <small>Set different hours and unavailable periods</small>
+              </summary>
+              <div id="custom-day-list" class="custom-day-list"></div>
+            </details>
+
+            <p class="form-error time-error" id="availability-error" role="alert"></p>
+            <div class="time-actions">
+              <button class="button button-primary" id="save-button" type="submit">
+                Save availability
+              </button>
+              <button class="button button-quiet" id="reset-button" type="button">
+                Reset
+              </button>
+            </div>
+          </section>
+        </form>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

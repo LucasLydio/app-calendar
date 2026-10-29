@@ -8,37 +8,21 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="rail" aria-label="Main navigation">
-        <a class="brand" href="#home" aria-label="Daybook home">
+    <header class="admin-header">
+      <nav class="top-nav" aria-label="Primary navigation">
+        <a class="top-nav-brand" href="/" aria-label="Daybook appointments">
           <span class="brand-mark" aria-hidden="true">D</span>
           <span class="brand-name">daybook</span>
         </a>
-        <p class="rail-label">Workspace</p>
-        <nav class="rail-nav" aria-label="Workspace">
-          <a class="rail-link" href="#overview" aria-label="Overview">
-            <span class="rail-link-mark" aria-hidden="true">&#9638;</span
-            ><span>Overview</span>
-          </a>
-          <a
-            class="rail-link"
-            href="#schedule"
-            aria-current="page"
-            aria-label="Schedule"
+        <div class="top-nav-links">
+          <a class="nav-link active" href="/" aria-current="page"
+            >Appointments</a
           >
-            <span class="rail-link-mark" aria-hidden="true">&#9635;</span
-            ><span>Schedule</span>
-          </a>
-          <a class="rail-link" href="#queue" aria-label="Approvals">
-            <span class="rail-link-mark" aria-hidden="true">&#10003;</span
-            ><span>Approvals</span>
-          </a>
-        </nav>
-        <p class="rail-note">
-          Appointments stay pending until reviewed by a manager.
-        </p>
-      </aside>
-
+          <a class="nav-link" href="/time">Availability</a>
+        </div>
+      </nav>
+    </header>
+    <div class="app-shell">
       <main class="workspace" id="overview">
         <header class="topbar">
           <div class="breadcrumb">

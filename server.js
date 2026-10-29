@@ -8,7 +8,24 @@ const { buildIcsCalendar, createCalendarWorker } = require('./calendar_worker');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-const DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+const DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+const DAY_ALIASES = {
+  sun: 'Sunday',
+  mon: 'Monday',
+  tue: 'Tuesday',
+  wed: 'Wednesday',
+  thu: 'Thursday',
+  fri: 'Friday',
+  sat: 'Saturday',
+};
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const appointments = [
@@ -56,13 +73,15 @@ const appointments = [
 
 let availability = {
   timeZone: 'UTC',
-  weeklySlots: [
-    { day: 'mon', start: '09:00', end: '17:00' },
-    { day: 'tue', start: '09:00', end: '17:00' },
-    { day: 'wed', start: '09:00', end: '17:00' },
-    { day: 'thu', start: '09:00', end: '17:00' },
-    { day: 'fri', start: '09:00', end: '17:00' },
-  ],
+  weeklySlots: DAY_NAMES.slice(1).concat(DAY_NAMES[0]).map((day) => ({
+    day,
+    active: !['Saturday', 'Sunday'].includes(day),
+    start: '09:00',
+    end: '17:00',
+    blackout: [],
+  })),
+  disabledDates: [],
+  blackoutHours: [],
 };
 
 const subscriptions = new Map();
@@ -122,7 +141,34 @@ app.get('/book', (_request, response) => {
   return response.sendFile(path.join(__dirname, 'book.html'));
 });
 
+app.get('/time', (_request, response) => {
+  return response.sendFile(path.join(__dirname, 'time.html'));
+});
+
 app.get('/api/appointments', (request, response) => {
+  const requestedDate = request.query.date;
+  const slotView =
+    request.query.view === 'slots' ||
+    (requestedDate && request.query.status === undefined);
+  if (slotView) {
+    if (
+      typeof requestedDate !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+    ) {
+      return response
+        .status(400)
+        .json({ error: 'A valid date (YYYY-MM-DD) is required.' });
+    }
+    const bookedSlots = appointments
+      .filter(
+        (appointment) =>
+          appointment.date === requestedDate &&
+          ['pending', 'approved'].includes(appointment.status),
+      )
+      .map((appointment) => appointment.time);
+    return response.status(200).json({ bookedSlots });
+  }
+
   const requestedStatus = request.query.status || 'pending';
   const allowedStatuses = new Set(['pending', 'approved', 'rejected', 'all']);
 
@@ -182,20 +228,34 @@ app.post('/api/appointments', (request, response) => {
       .json({ error: 'userId must be a non-empty string.' });
   }
 
-  const day = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][
+  const day = DAY_NAMES[
     new Date(`${date}T00:00:00.000Z`).getUTCDay()
   ];
   const requestedStart = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
   const isAvailable = availability.weeklySlots.some((slot) => {
-    if (slot.day !== day) return false;
+    if ((DAY_ALIASES[slot.day] || slot.day) !== day || slot.active === false)
+      return false;
     const slotStart =
       Number(slot.start.slice(0, 2)) * 60 + Number(slot.start.slice(3));
     const slotEnd =
       Number(slot.end.slice(0, 2)) * 60 + Number(slot.end.slice(3));
+    const requestedEnd = requestedStart + durationMinutes;
+    const overlapsBlackout = (Array.isArray(slot.blackout)
+      ? slot.blackout
+      : []
+    ).some((period) => {
+      const [start, end] = period.split('-');
+      const blackoutStart =
+        Number(start.slice(0, 2)) * 60 + Number(start.slice(3));
+      const blackoutEnd =
+        Number(end.slice(0, 2)) * 60 + Number(end.slice(3));
+      return requestedStart < blackoutEnd && blackoutStart < requestedEnd;
+    });
     return (
       requestedStart >= slotStart &&
-      requestedStart + durationMinutes <= slotEnd &&
-      (requestedStart - slotStart) % durationMinutes === 0
+      requestedEnd <= slotEnd &&
+      (requestedStart - slotStart) % durationMinutes === 0 &&
+      !overlapsBlackout
     );
   });
 
@@ -307,10 +367,24 @@ app.put('/api/availability', (request, response) => {
   const slotsAreValid = weeklySlots.every(
     (slot) =>
       slot &&
-      DAYS.has(slot.day) &&
+      (DAY_NAMES.includes(slot.day) || DAY_ALIASES[slot.day]) &&
+      (slot.active === undefined || typeof slot.active === 'boolean') &&
       TIME_PATTERN.test(slot.start) &&
       TIME_PATTERN.test(slot.end) &&
-      slot.start < slot.end,
+      slot.start < slot.end &&
+      (slot.blackout === undefined ||
+        (Array.isArray(slot.blackout) &&
+          slot.blackout.every((period) => {
+            if (typeof period !== 'string') return false;
+            const [start, end] = period.split('-');
+            return (
+              TIME_PATTERN.test(start) &&
+              TIME_PATTERN.test(end) &&
+              start < end &&
+              start >= slot.start &&
+              end <= slot.end
+            );
+          }))),
   );
 
   if (!slotsAreValid) {
@@ -322,11 +396,15 @@ app.put('/api/availability', (request, response) => {
 
   availability = {
     timeZone: timeZone.trim(),
-    weeklySlots: weeklySlots.map(({ day, start, end }) => ({
-      day,
+    weeklySlots: weeklySlots.map(({ day, active, start, end, blackout }) => ({
+      day: DAY_ALIASES[day] || day,
+      active: active !== false,
       start,
       end,
+      blackout: Array.isArray(blackout) ? blackout : [],
     })),
+    disabledDates: [],
+    blackoutHours: [],
   };
 
   return response.status(200).json({ availability });

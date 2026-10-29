@@ -57,10 +57,22 @@
 
   function availabilityFromApi(availability) {
     const slots = availability.weeklySlots || [];
+    const dayKeys = {
+      Monday: 'mon',
+      Tuesday: 'tue',
+      Wednesday: 'wed',
+      Thursday: 'thu',
+      Friday: 'fri',
+      Saturday: 'sat',
+      Sunday: 'sun',
+    };
+    const activeSlots = slots.filter((slot) => slot.active !== false);
     return {
-      days: [...new Set(slots.map((slot) => slot.day))],
-      start: slots[0]?.start || '09:00',
-      end: slots[0]?.end || '17:00',
+      days: [
+        ...new Set(activeSlots.map((slot) => dayKeys[slot.day] || slot.day)),
+      ],
+      start: activeSlots[0]?.start || '09:00',
+      end: activeSlots[0]?.end || '17:00',
       timeZone: availability.timeZone || 'UTC',
     };
   }

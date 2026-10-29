@@ -70,6 +70,11 @@
   status = 200
 
 [[redirects]]
+from = "/time"
+to = "/time.html"
+status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

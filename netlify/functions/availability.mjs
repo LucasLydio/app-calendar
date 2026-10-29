@@ -2,18 +2,81 @@ import { availability as availabilityTable } from '../../db/schema.ts';
 import { db } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 
-const DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+const DAYS = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+];
+const DAY_ALIASES = {
+  mon: 'Monday',
+  tue: 'Tuesday',
+  wed: 'Wednesday',
+  thu: 'Thursday',
+  fri: 'Friday',
+  sat: 'Saturday',
+  sun: 'Sunday',
+};
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const BLACKOUT_PATTERN = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
 const DEFAULT_AVAILABILITY = {
   timeZone: 'UTC',
-  weeklySlots: [
-    { day: 'mon', start: '09:00', end: '17:00' },
-    { day: 'tue', start: '09:00', end: '17:00' },
-    { day: 'wed', start: '09:00', end: '17:00' },
-    { day: 'thu', start: '09:00', end: '17:00' },
-    { day: 'fri', start: '09:00', end: '17:00' },
-  ],
+  weeklySlots: DAYS.map((day) => ({
+    day,
+    active: !['Saturday', 'Sunday'].includes(day),
+    start: '09:00',
+    end: '17:00',
+    blackout: [],
+  })),
+  disabledDates: [],
+  blackoutHours: [],
 };
+
+function canonicalDay(day) {
+  return DAY_ALIASES[day] || (DAYS.includes(day) ? day : null);
+}
+
+function validBlackout(period, start, end) {
+  if (typeof period !== 'string' || !BLACKOUT_PATTERN.test(period))
+    return false;
+  const [blackoutStart, blackoutEnd] = period.split('-');
+  return blackoutStart < blackoutEnd && blackoutStart >= start && blackoutEnd <= end;
+}
+
+function normalizeSlots(slots) {
+  const byDay = new Map(
+    (Array.isArray(slots) ? slots : [])
+      .map((slot) => [canonicalDay(slot?.day), slot])
+      .filter(([day]) => day),
+  );
+  return DAYS.map((day) => {
+    const slot = byDay.get(day);
+    const start = TIME_PATTERN.test(slot?.start) ? slot.start : '09:00';
+    const candidateEnd = TIME_PATTERN.test(slot?.end) ? slot.end : '17:00';
+    const end = candidateEnd > start ? candidateEnd : '17:00';
+    return {
+      day,
+      active: slot ? slot.active !== false : false,
+      start,
+      end,
+      blackout: (Array.isArray(slot?.blackout) ? slot.blackout : []).filter(
+        (period) => validBlackout(period, start, end),
+      ),
+    };
+  });
+}
+
+function availabilityPayload(timeZone, slots) {
+  return {
+    timeZone: typeof timeZone === 'string' && timeZone ? timeZone : 'UTC',
+    weeklySlots: normalizeSlots(slots),
+    disabledDates: [],
+    blackoutHours: [],
+  };
+}
 
 export default async function handler(request) {
   try {
@@ -21,13 +84,13 @@ export default async function handler(request) {
       const [row] = await db.select().from(availabilityTable).limit(1);
       return jsonResponse({
         availability: row
-          ? { timeZone: row.timeZone, weeklySlots: row.weeklySlots }
+          ? availabilityPayload(row.timeZone, row.weeklySlots)
           : DEFAULT_AVAILABILITY,
       });
     }
-    if (request.method !== 'PUT') {
+    if (!['POST', 'PUT'].includes(request.method)) {
       return jsonResponse({ error: 'Method not allowed.' }, 405, {
-        Allow: 'GET, PUT',
+        Allow: 'GET, POST, PUT',
       });
     }
 
@@ -51,31 +114,37 @@ export default async function handler(request) {
         400,
       );
     }
-    const validSlots = weeklySlots.every(
-      (slot) =>
-        slot &&
-        DAYS.has(slot.day) &&
-        typeof slot.start === 'string' &&
-        TIME_PATTERN.test(slot.start) &&
-        typeof slot.end === 'string' &&
-        TIME_PATTERN.test(slot.end) &&
-        slot.start < slot.end,
-    );
+    const normalizedDays = weeklySlots.map((slot) => canonicalDay(slot?.day));
+    const validSlots =
+      weeklySlots.length <= DAYS.length &&
+      new Set(normalizedDays).size === normalizedDays.length &&
+      weeklySlots.every(
+        (slot) =>
+          slot &&
+          canonicalDay(slot.day) &&
+          (slot.active === undefined || typeof slot.active === 'boolean') &&
+          typeof slot.start === 'string' &&
+          TIME_PATTERN.test(slot.start) &&
+          typeof slot.end === 'string' &&
+          TIME_PATTERN.test(slot.end) &&
+          slot.start < slot.end &&
+          (slot.blackout === undefined ||
+            (Array.isArray(slot.blackout) &&
+              slot.blackout.every((period) =>
+                validBlackout(period, slot.start, slot.end),
+              ))),
+      );
     if (!validSlots) {
       return jsonResponse(
         {
           error:
-            'Each slot needs a valid weekday and start/end times, with end after start.',
+            'Each unique day needs active, valid start/end times, and blackout periods within its operating hours.',
         },
         400,
       );
     }
 
-    const normalizedSlots = weeklySlots.map(({ day, start, end }) => ({
-      day,
-      start,
-      end,
-    }));
+    const normalizedSlots = normalizeSlots(weeklySlots);
     const [row] = await db
       .insert(availabilityTable)
       .values({ timeZone: timeZone.trim(), weeklySlots: normalizedSlots })
@@ -90,8 +159,7 @@ export default async function handler(request) {
       .returning();
     return jsonResponse({
       availability: {
-        timeZone: row.timeZone,
-        weeklySlots: row.weeklySlots,
+        ...availabilityPayload(row?.timeZone, row?.weeklySlots),
       },
     });
   } catch (error) {

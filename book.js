@@ -4,7 +4,15 @@
   const API_BASE_URL = '/api';
   const PUSH_USER_ID_KEY = 'daybook-customer-push-user-id';
   const APPOINTMENT_DURATION_MINUTES = 60;
-  const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const DAY_KEYS = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+  ];
   const elements = {
     form: document.querySelector('#booking-form'),
     date: document.querySelector('#booking-date'),
@@ -23,6 +31,43 @@
 
   let availability;
   let bookedTimes = [];
+
+  function normalizeAvailability(payload) {
+    const value = payload?.availability;
+    return {
+      timeZone:
+        typeof value?.timeZone === 'string' && value.timeZone
+          ? value.timeZone
+          : 'UTC',
+      weeklySlots: (Array.isArray(value?.weeklySlots)
+        ? value.weeklySlots
+        : []
+      )
+        .filter(
+          (slot) =>
+            slot &&
+            typeof slot.day === 'string' &&
+            typeof slot.start === 'string' &&
+            typeof slot.end === 'string',
+        )
+        .map((slot) => ({
+          ...slot,
+          blackout: Array.isArray(slot.blackout) ? slot.blackout : [],
+        })),
+      disabledDates: Array.isArray(value?.disabledDates)
+        ? value.disabledDates
+        : [],
+      blackoutHours: Array.isArray(value?.blackoutHours)
+        ? value.blackoutHours
+        : [],
+    };
+  }
+
+  function normalizeBookedSlots(payload) {
+    return (Array.isArray(payload?.bookedSlots) ? payload.bookedSlots : [])
+      .filter((time) => typeof time === 'string')
+      .map((time) => time.slice(0, 5));
+  }
 
   async function apiRequest(path, options = {}) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -113,8 +158,8 @@
     }
 
     const day = scheduleDayForDate(elements.date.value);
-    const slots = availability.weeklySlots.filter(
-      (slot) => slot.day === day,
+    const slots = (availability.weeklySlots ?? []).filter(
+      (slot) => slot.day === day && slot.active !== false,
     );
     const slotTimes = slots
       .flatMap((slot) => {
@@ -131,9 +176,26 @@
           minutes + APPOINTMENT_DURATION_MINUTES <= end;
           minutes += APPOINTMENT_DURATION_MINUTES
         ) {
-          times.push(
-            `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`,
-          );
+          const overlapsBlackout = (Array.isArray(slot.blackout)
+            ? slot.blackout
+            : []
+          ).some((period) => {
+            const [blackoutStart, blackoutEnd] = period
+              .split('-')
+              .map((value) => {
+                const [hour, minute] = value.split(':').map(Number);
+                return hour * 60 + minute;
+              });
+            return (
+              minutes < blackoutEnd &&
+              blackoutStart < minutes + APPOINTMENT_DURATION_MINUTES
+            );
+          });
+          if (!overlapsBlackout) {
+            times.push(
+              `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`,
+            );
+          }
         }
         return times;
       })
@@ -145,14 +207,12 @@
         ) {
           return false;
         }
-        return !bookedTimes.includes(time);
+        return !(bookedTimes ?? []).includes(time);
       });
 
     if (!slotTimes.length) {
       elements.slots.append(
-        createSlotMessage(
-          'No appointment times are available on this day.',
-        ),
+        createSlotMessage('No available time slots found for this date.'),
       );
       return;
     }
@@ -261,7 +321,7 @@
         },
       });
 
-      bookedTimes.push(result.appointment.time);
+      bookedTimes = [...(bookedTimes ?? []), result.appointment.time];
       elements.name.value = '';
       elements.email.value = '';
       clearTimeSelection();
@@ -306,7 +366,7 @@
 
     try {
       const availabilityResult = await apiRequest('/availability');
-      availability = availabilityResult.availability;
+      availability = normalizeAvailability(availabilityResult);
       elements.timeZone.textContent = availability.timeZone;
       elements.summaryZone.textContent = availability.timeZone;
       await loadBookedTimes();
@@ -335,7 +395,7 @@
         `/appointments?view=slots&date=${encodeURIComponent(date)}`,
       );
       if (elements.date.value !== date) return;
-      bookedTimes = result.bookedSlots;
+      bookedTimes = normalizeBookedSlots(result);
       renderSlots();
     } catch (error) {
       if (elements.date.value !== date) return;
