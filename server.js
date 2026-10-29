@@ -107,6 +107,7 @@ function configureVapid() {
 const vapidPublicKey = configureVapid();
 
 app.use(express.json({ limit: '32kb' }));
+app.use(express.static(__dirname));
 
 app.get('/', (_request, response) => {
   return response.sendFile(path.join(__dirname, 'index.html'));

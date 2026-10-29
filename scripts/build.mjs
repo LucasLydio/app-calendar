@@ -9,7 +9,11 @@ await rm(publishDir, { recursive: true, force: true });
 await mkdir(publishDir, { recursive: true });
 for (const file of [
   'index.html',
+  'styles.css',
+  'script.js',
   'book.html',
+  'book.css',
+  'book.js',
   'service-worker.js',
   '_redirects',
 ]) {
