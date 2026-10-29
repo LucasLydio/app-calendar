@@ -31,12 +31,20 @@ export function errorResponse(error) {
     );
   }
   const status = Number.isInteger(error?.status) ? error.status : 500;
-  console.error('Netlify function error:', error);
   const message = error instanceof Error ? error.message : String(error);
+  if (status >= 500) {
+    console.error('Netlify function error:', {
+      message,
+      code: error?.code || error?.cause?.code,
+      cause: error?.cause?.message,
+      stack: error?.stack,
+      causeStack: error?.cause?.stack,
+    });
+  }
   return jsonResponse(
     {
       error: status >= 500 ? 'Internal Server Error' : 'Request Error',
-      message,
+      message: status >= 500 ? 'The request could not be completed.' : message,
     },
     status,
   );
