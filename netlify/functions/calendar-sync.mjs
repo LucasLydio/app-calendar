@@ -136,7 +136,7 @@ async function syncGoogleAppointment(appointment, timeZone, accessToken) {
 
 async function executeRows(query) {
   const result = await db.execute(query);
-  return result.rows;
+  return Array.isArray(result?.rows) ? result.rows : [];
 }
 
 async function claimJobs() {
@@ -222,9 +222,15 @@ async function markFailed(job, appointment, error) {
 
 export default async function handler() {
   try {
-    const jobs = await claimJobs();
-    if (!jobs.length)
-      return new Response('No calendar sync jobs due.', { status: 200 });
+    const claimedJobs = await claimJobs();
+    const jobs = Array.isArray(claimedJobs) ? claimedJobs : [];
+    if (jobs.length === 0) {
+      console.log('Console: No pending calendar outbox items to process.');
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: 'No items to sync' }),
+      };
+    }
     const availability = await getAvailability();
     let accessToken;
     try {
