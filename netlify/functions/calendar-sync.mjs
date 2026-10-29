@@ -1,7 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { buildGoogleEventPayload, googleEventId } from './lib/calendar.mjs';
 import { db, getAvailability } from './lib/db.mjs';
-import { errorResponse } from './lib/http.mjs';
 
 const BATCH_SIZE = 3;
 const MAX_ATTEMPTS = Number(process.env.CALENDAR_WORKER_MAX_ATTEMPTS) || 5;
@@ -220,16 +219,16 @@ async function markFailed(job, appointment, error) {
   );
 }
 
-export default async function handler() {
+export default async function handler(_request, _context) {
   try {
     const claimedJobs = await claimJobs();
     const jobs = Array.isArray(claimedJobs) ? claimedJobs : [];
     if (jobs.length === 0) {
       console.log('Console: No pending calendar outbox items to process.');
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ message: 'No items to sync' }),
-      };
+      return new Response(JSON.stringify({ message: 'No items to sync' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
     const availability = await getAvailability();
     let accessToken;
@@ -239,9 +238,15 @@ export default async function handler() {
       await Promise.all(
         jobs.map((job) => markFailed(job, appointmentFromJob(job), error)),
       );
-      return new Response(`Processed ${jobs.length} calendar sync job(s).`, {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({
+          message: `Processed ${jobs.length} calendar sync job(s).`,
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
     }
 
     await Promise.all(
@@ -267,11 +272,25 @@ export default async function handler() {
         }
       }),
     );
-    return new Response(`Processed ${jobs.length} calendar sync job(s).`, {
-      status: 200,
-    });
+    return new Response(
+      JSON.stringify({
+        message: `Processed ${jobs.length} calendar sync job(s).`,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   } catch (error) {
     console.error('Scheduled calendar sync failed:', error);
-    return errorResponse(error);
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 }
