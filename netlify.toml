@@ -23,6 +23,12 @@
   background = true
 
 [[redirects]]
+  from = "/api/health"
+  to = "/.netlify/functions/health"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/appointments/:id/approve"
   to = "/.netlify/functions/appointment-action?id=:id&action=approve"
   status = 200

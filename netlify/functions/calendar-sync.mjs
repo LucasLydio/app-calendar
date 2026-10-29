@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { buildGoogleEventPayload, googleEventId } from './lib/calendar.mjs';
 import { db, getAvailability } from './lib/db.mjs';
+import { errorResponse } from './lib/http.mjs';
 
 const BATCH_SIZE = 3;
 const MAX_ATTEMPTS = Number(process.env.CALENDAR_WORKER_MAX_ATTEMPTS) || 5;
@@ -265,8 +266,6 @@ export default async function handler() {
     });
   } catch (error) {
     console.error('Scheduled calendar sync failed:', error);
-    return new Response('Calendar sync failed; due jobs will be retried.', {
-      status: 500,
-    });
+    return errorResponse(error);
   }
 }

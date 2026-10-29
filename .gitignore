@@ -103,7 +103,7 @@ secrets/
 *.key
 *.p12
 *.pfx
-
+vapid
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

@@ -1,14 +1,29 @@
 import { availability as availabilityTable } from '../../db/schema.ts';
-import { db, getAvailability } from './lib/db.mjs';
+import { db } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 
 const DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DEFAULT_AVAILABILITY = {
+  timeZone: 'UTC',
+  weeklySlots: [
+    { day: 'mon', start: '09:00', end: '17:00' },
+    { day: 'tue', start: '09:00', end: '17:00' },
+    { day: 'wed', start: '09:00', end: '17:00' },
+    { day: 'thu', start: '09:00', end: '17:00' },
+    { day: 'fri', start: '09:00', end: '17:00' },
+  ],
+};
 
 export default async function handler(request) {
   try {
     if (request.method === 'GET') {
-      return jsonResponse({ availability: await getAvailability() });
+      const [row] = await db.select().from(availabilityTable).limit(1);
+      return jsonResponse({
+        availability: row
+          ? { timeZone: row.timeZone, weeklySlots: row.weeklySlots }
+          : DEFAULT_AVAILABILITY,
+      });
     }
     if (request.method !== 'PUT') {
       return jsonResponse({ error: 'Method not allowed.' }, 405, {
@@ -80,6 +95,7 @@ export default async function handler(request) {
       },
     });
   } catch (error) {
+    console.error('Availability API Error:', error);
     return errorResponse(error);
   }
 }

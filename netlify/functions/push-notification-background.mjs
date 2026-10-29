@@ -2,18 +2,19 @@ import { eq } from 'drizzle-orm';
 import webPush from 'web-push';
 import { pushSubscriptions } from '../../db/schema.ts';
 import { db, getSubscriptionsForUser } from './lib/db.mjs';
+import { errorResponse } from './lib/http.mjs';
 import { getVapidPublicKey } from './lib/push.mjs';
 
 export default async function handler(request) {
-  const expectedToken = process.env.INTERNAL_FUNCTION_TOKEN;
-  if (
-    !expectedToken ||
-    request.headers.get('x-internal-function-token') !== expectedToken
-  ) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
   try {
+    const expectedToken = process.env.INTERNAL_FUNCTION_TOKEN;
+    if (
+      !expectedToken ||
+      request.headers.get('x-internal-function-token') !== expectedToken
+    ) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
     const { appointment, status } = await request.json();
     if (!appointment?.userId || !['approved', 'rejected'].includes(status)) {
       return new Response('Invalid notification payload', { status: 400 });
@@ -60,7 +61,7 @@ export default async function handler(request) {
     return new Response('Push notifications processed.', { status: 200 });
   } catch (error) {
     console.error('Background push delivery failed:', error);
-    return new Response('Push delivery failed.', { status: 500 });
+    return errorResponse(error);
   }
 }
 
