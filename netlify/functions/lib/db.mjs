@@ -33,9 +33,7 @@ export function appointmentFromRow(row) {
 export async function getAvailability(database = db) {
   const [row] = await database.select().from(availability).limit(1);
   if (!row)
-    throw new Error(
-      'Availability is missing from the Netlify Database schema.',
-    );
+    throw new Error('Availability is missing from the database schema.');
   return { timeZone: row.timeZone, weeklySlots: row.weeklySlots };
 }
 

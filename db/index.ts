@@ -1,4 +1,13 @@
-import { drizzle } from 'drizzle-orm/netlify-db';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
 import * as schema from './schema';
 
-export const db = drizzle({ schema });
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error('DATABASE_URL must be configured.');
+}
+
+const client = postgres(connectionString, { prepare: false });
+
+export const db = drizzle(client, { schema });

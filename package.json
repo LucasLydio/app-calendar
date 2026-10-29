@@ -1,13 +1,14 @@
 {
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@netlify/database": "^2.0.1",
-    "drizzle-orm": "^1.0.0-beta.22",
+    "drizzle-orm": "^0.45.4",
     "express": "^5.3.0",
+    "postgres": "^3.4.9",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "drizzle-kit": "^1.0.0-beta.22"
+    "dotenv": "^18.0.9",
+    "drizzle-kit": "^0.31.11"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
