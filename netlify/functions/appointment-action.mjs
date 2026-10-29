@@ -12,8 +12,14 @@ export default async function handler(request) {
       });
     }
     const url = new URL(request.url);
-    const appointmentId = url.searchParams.get('id');
-    const action = url.searchParams.get('action');
+    const pathMatch = url.pathname.match(
+      /^\/api\/appointments\/([^/]+)\/(approve|reject)\/?$/,
+    );
+    const appointmentId =
+      url.searchParams.get('id') ||
+      (pathMatch ? decodeURIComponent(pathMatch[1]) : null);
+    const action =
+      url.searchParams.get('action') || (pathMatch ? pathMatch[2] : null);
     if (!appointmentId || !['approve', 'reject'].includes(action)) {
       return jsonResponse(
         { error: 'Appointment ID and approve/reject action are required.' },
