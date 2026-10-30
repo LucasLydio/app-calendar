@@ -4,7 +4,7 @@ import {
   dateSpecificExceptions as dateSpecificExceptionsTable,
 } from '../../db/schema.ts';
 import { db } from './lib/db.mjs';
-import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
+import { jsonResponse, readJson } from './lib/http.mjs';
 
 const DAYS = [
   'Monday',
@@ -175,20 +175,52 @@ function availabilityPayload(timeZone, slots, dateExceptions = []) {
   };
 }
 
+function isMissingExceptionsTable(error) {
+  return error?.code === '42P01' || error?.cause?.code === '42P01';
+}
+
+async function loadDateExceptions(database = db) {
+  try {
+    const rows = await database
+      .select()
+      .from(dateSpecificExceptionsTable)
+      .where(eq(dateSpecificExceptionsTable.userId, DEFAULT_USER_ID))
+      .orderBy(
+        asc(dateSpecificExceptionsTable.exceptionDate),
+        asc(dateSpecificExceptionsTable.startTime),
+      );
+    return Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    if (!isMissingExceptionsTable(error)) throw error;
+    console.warn(
+      'date_specific_exceptions is not migrated yet; returning no one-off exceptions.',
+    );
+    return [];
+  }
+}
+
+async function upsertAvailability(database, timeZone, weeklySlots) {
+  const rows = await database
+    .insert(availabilityTable)
+    .values({ timeZone, weeklySlots })
+    .onConflictDoUpdate({
+      target: availabilityTable.singletonId,
+      set: { timeZone, weeklySlots, updatedAt: new Date() },
+    })
+    .returning();
+  return Array.isArray(rows) ? rows[0] : undefined;
+}
+
 export default async function handler(request) {
   try {
     if (request.method === 'GET') {
-      const [[row], dateExceptions] = await Promise.all([
+      const [availabilityRows, dateExceptions] = await Promise.all([
         db.select().from(availabilityTable).limit(1),
-        db
-          .select()
-          .from(dateSpecificExceptionsTable)
-          .where(eq(dateSpecificExceptionsTable.userId, DEFAULT_USER_ID))
-          .orderBy(
-            asc(dateSpecificExceptionsTable.exceptionDate),
-            asc(dateSpecificExceptionsTable.startTime),
-          ),
+        loadDateExceptions(),
       ]);
+      const row = Array.isArray(availabilityRows)
+        ? availabilityRows[0]
+        : undefined;
       return jsonResponse({
         availability: row
           ? availabilityPayload(
@@ -263,34 +295,48 @@ export default async function handler(request) {
     const normalizedExceptions = normalizeDateExceptions(
       dateSpecificExceptions,
     );
-    const row = await db.transaction(async (transaction) => {
-      const [savedAvailability] = await transaction
-        .insert(availabilityTable)
-        .values({ timeZone: timeZone.trim(), weeklySlots: normalizedSlots })
-        .onConflictDoUpdate({
-          target: availabilityTable.singletonId,
-          set: {
-            timeZone: timeZone.trim(),
-            weeklySlots: normalizedSlots,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
-      await transaction
-        .delete(dateSpecificExceptionsTable)
-        .where(eq(dateSpecificExceptionsTable.userId, DEFAULT_USER_ID));
+    let row;
+    try {
+      row = await db.transaction(async (transaction) => {
+        const savedAvailability = await upsertAvailability(
+          transaction,
+          timeZone.trim(),
+          normalizedSlots,
+        );
+        await transaction
+          .delete(dateSpecificExceptionsTable)
+          .where(eq(dateSpecificExceptionsTable.userId, DEFAULT_USER_ID));
+        if (normalizedExceptions.length > 0) {
+          await transaction.insert(dateSpecificExceptionsTable).values(
+            normalizedExceptions.map((exception) => ({
+              userId: DEFAULT_USER_ID,
+              exceptionDate: exception.date,
+              startTime: exception.start,
+              endTime: exception.end,
+            })),
+          );
+        }
+        return savedAvailability;
+      });
+    } catch (error) {
+      if (!isMissingExceptionsTable(error)) throw error;
       if (normalizedExceptions.length > 0) {
-        await transaction.insert(dateSpecificExceptionsTable).values(
-          normalizedExceptions.map((exception) => ({
-            userId: DEFAULT_USER_ID,
-            exceptionDate: exception.date,
-            startTime: exception.start,
-            endTime: exception.end,
-          })),
+        throw Object.assign(
+          new Error(
+            'date_specific_exceptions is missing. Apply drizzle/0001_luxuriant_lilith.sql before saving one-off exceptions.',
+          ),
+          { status: 503, cause: error },
         );
       }
-      return savedAvailability;
-    });
+      console.warn(
+        'date_specific_exceptions is not migrated yet; saving recurring availability only.',
+      );
+      row = await upsertAvailability(
+        db,
+        timeZone.trim(),
+        normalizedSlots,
+      );
+    }
     return jsonResponse({
       availability: {
         ...availabilityPayload(
@@ -301,7 +347,25 @@ export default async function handler(request) {
       },
     });
   } catch (error) {
-    console.error('Availability API Error:', error);
-    return errorResponse(error);
+    console.error('Availability API Crash:', error);
+    if (Number.isInteger(error?.status) && error.status < 500) {
+      return jsonResponse(
+        { error: 'Request Error', message: error.message },
+        error.status,
+      );
+    }
+    // Temporary deployment diagnostic: remove `stack` after migration 0001 is
+    // applied and the production endpoint is confirmed healthy.
+    return new Response(
+      JSON.stringify({
+        error: 'Internal Server Error',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      }),
+      {
+        status: Number.isInteger(error?.status) ? error.status : 500,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 }

@@ -35,22 +35,31 @@ export function appointmentFromRow(row) {
 }
 
 export async function getAvailability(database = db) {
-  const [[row], exceptionRows] = await Promise.all([
-    database.select().from(availability).limit(1),
-    database
+  const availabilityRows = await database.select().from(availability).limit(1);
+  const row = Array.isArray(availabilityRows)
+    ? availabilityRows[0]
+    : undefined;
+  let exceptionRows = [];
+  try {
+    const rows = await database
       .select()
       .from(dateSpecificExceptions)
-      .where(eq(dateSpecificExceptions.userId, 'default')),
-  ]);
+      .where(eq(dateSpecificExceptions.userId, 'default'));
+    exceptionRows = Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    const missingTable =
+      error?.code === '42P01' || error?.cause?.code === '42P01';
+    if (!missingTable) throw error;
+    console.warn(
+      'date_specific_exceptions is not migrated yet; booking checks will use recurring availability only.',
+    );
+  }
   if (!row)
     throw new Error('Availability is missing from the database schema.');
   return {
     timeZone: row.timeZone,
     weeklySlots: row.weeklySlots,
-    dateSpecificExceptions: (Array.isArray(exceptionRows)
-      ? exceptionRows
-      : []
-    ).map((exception) => ({
+    dateSpecificExceptions: exceptionRows.map((exception) => ({
       date: String(exception.exceptionDate).slice(0, 10),
       start: String(exception.startTime).slice(0, 5),
       end: String(exception.endTime).slice(0, 5),
