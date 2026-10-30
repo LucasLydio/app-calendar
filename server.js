@@ -78,10 +78,11 @@ let availability = {
     active: !['Saturday', 'Sunday'].includes(day),
     start: '09:00',
     end: '17:00',
-    blackout: [],
+    blackoutSlots: [],
   })),
   disabledDates: [],
   blackoutHours: [],
+  dateSpecificExceptions: [],
 };
 
 const subscriptions = new Map();
@@ -232,32 +233,47 @@ app.post('/api/appointments', (request, response) => {
     new Date(`${date}T00:00:00.000Z`).getUTCDay()
   ];
   const requestedStart = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-  const isAvailable = availability.weeklySlots.some((slot) => {
-    if ((DAY_ALIASES[slot.day] || slot.day) !== day || slot.active === false)
-      return false;
-    const slotStart =
-      Number(slot.start.slice(0, 2)) * 60 + Number(slot.start.slice(3));
-    const slotEnd =
-      Number(slot.end.slice(0, 2)) * 60 + Number(slot.end.slice(3));
-    const requestedEnd = requestedStart + durationMinutes;
-    const overlapsBlackout = (Array.isArray(slot.blackout)
-      ? slot.blackout
-      : []
-    ).some((period) => {
-      const [start, end] = period.split('-');
-      const blackoutStart =
-        Number(start.slice(0, 2)) * 60 + Number(start.slice(3));
-      const blackoutEnd =
-        Number(end.slice(0, 2)) * 60 + Number(end.slice(3));
-      return requestedStart < blackoutEnd && blackoutStart < requestedEnd;
+  const requestedEnd = requestedStart + durationMinutes;
+  const blockedByDateException = availability.dateSpecificExceptions.some(
+    (exception) => {
+      if (exception.date !== date) return false;
+      const exceptionStart =
+        Number(exception.start.slice(0, 2)) * 60 +
+        Number(exception.start.slice(3));
+      const exceptionEnd =
+        Number(exception.end.slice(0, 2)) * 60 + Number(exception.end.slice(3));
+      return requestedStart < exceptionEnd && exceptionStart < requestedEnd;
+    },
+  );
+  const isAvailable =
+    !blockedByDateException &&
+    availability.weeklySlots.some((slot) => {
+      if ((DAY_ALIASES[slot.day] || slot.day) !== day || slot.active === false)
+        return false;
+      const slotStart =
+        Number(slot.start.slice(0, 2)) * 60 + Number(slot.start.slice(3));
+      const slotEnd =
+        Number(slot.end.slice(0, 2)) * 60 + Number(slot.end.slice(3));
+      const blackoutSlots = Array.isArray(slot.blackoutSlots)
+        ? slot.blackoutSlots
+        : Array.isArray(slot.blackout)
+          ? slot.blackout
+          : [];
+      const overlapsBlackout = blackoutSlots.some((period) => {
+        const [start, end] = period.split('-');
+        const blackoutStart =
+          Number(start.slice(0, 2)) * 60 + Number(start.slice(3));
+        const blackoutEnd =
+          Number(end.slice(0, 2)) * 60 + Number(end.slice(3));
+        return requestedStart < blackoutEnd && blackoutStart < requestedEnd;
+      });
+      return (
+        requestedStart >= slotStart &&
+        requestedEnd <= slotEnd &&
+        (requestedStart - slotStart) % durationMinutes === 0 &&
+        !overlapsBlackout
+      );
     });
-    return (
-      requestedStart >= slotStart &&
-      requestedEnd <= slotEnd &&
-      (requestedStart - slotStart) % durationMinutes === 0 &&
-      !overlapsBlackout
-    );
-  });
 
   if (!isAvailable) {
     return response.status(409).json({
@@ -281,7 +297,6 @@ app.post('/api/appointments', (request, response) => {
     });
   }
 
-  const requestedEnd = requestedStart + durationMinutes;
   const hasConflict = appointments.some((appointment) => {
     if (
       appointment.date !== date ||
@@ -353,11 +368,13 @@ app.get('/api/availability', (_request, response) => {
 
 app.put('/api/availability', (request, response) => {
   const { timeZone, weeklySlots } = request.body || {};
+  const dateSpecificExceptions = request.body?.dateSpecificExceptions ?? [];
 
   if (
     typeof timeZone !== 'string' ||
     !timeZone.trim() ||
-    !Array.isArray(weeklySlots)
+    !Array.isArray(weeklySlots) ||
+    !Array.isArray(dateSpecificExceptions)
   ) {
     return response
       .status(400)
@@ -372,9 +389,9 @@ app.put('/api/availability', (request, response) => {
       TIME_PATTERN.test(slot.start) &&
       TIME_PATTERN.test(slot.end) &&
       slot.start < slot.end &&
-      (slot.blackout === undefined ||
-        (Array.isArray(slot.blackout) &&
-          slot.blackout.every((period) => {
+      (slot.blackoutSlots === undefined ||
+        (Array.isArray(slot.blackoutSlots) &&
+          slot.blackoutSlots.every((period) => {
             if (typeof period !== 'string') return false;
             const [start, end] = period.split('-');
             return (
@@ -386,8 +403,17 @@ app.put('/api/availability', (request, response) => {
             );
           }))),
   );
+  const exceptionsAreValid = dateSpecificExceptions.every(
+    (exception) =>
+      exception &&
+      typeof exception.date === 'string' &&
+      /^\d{4}-\d{2}-\d{2}$/.test(exception.date) &&
+      TIME_PATTERN.test(exception.start) &&
+      TIME_PATTERN.test(exception.end) &&
+      exception.start < exception.end,
+  );
 
-  if (!slotsAreValid) {
+  if (!slotsAreValid || !exceptionsAreValid) {
     return response.status(400).json({
       error:
         'Each slot needs a valid weekday and start/end times, with end after start.',
@@ -396,15 +422,26 @@ app.put('/api/availability', (request, response) => {
 
   availability = {
     timeZone: timeZone.trim(),
-    weeklySlots: weeklySlots.map(({ day, active, start, end, blackout }) => ({
-      day: DAY_ALIASES[day] || day,
-      active: active !== false,
-      start,
-      end,
-      blackout: Array.isArray(blackout) ? blackout : [],
-    })),
+    weeklySlots: weeklySlots.map(
+      ({ day, active, start, end, blackoutSlots, blackout }) => ({
+        day: DAY_ALIASES[day] || day,
+        active: active !== false,
+        start,
+        end,
+        blackoutSlots: Array.isArray(blackoutSlots)
+          ? blackoutSlots
+          : Array.isArray(blackout)
+            ? blackout
+            : [],
+      }),
+    ),
     disabledDates: [],
     blackoutHours: [],
+    dateSpecificExceptions: dateSpecificExceptions
+      .map(({ date, start, end }) => ({ date, start, end }))
+      .sort((a, b) =>
+        `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`),
+      ),
   };
 
   return response.status(200).json({ availability });

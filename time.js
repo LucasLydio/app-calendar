@@ -29,6 +29,13 @@
     defaultStart: document.querySelector('#default-start'),
     defaultEnd: document.querySelector('#default-end'),
     customDayList: document.querySelector('#custom-day-list'),
+    addDateException: document.querySelector('#add-date-exception'),
+    dateExceptionForm: document.querySelector('#date-exception-form'),
+    exceptionDate: document.querySelector('#exception-date'),
+    exceptionStart: document.querySelector('#exception-start'),
+    exceptionEnd: document.querySelector('#exception-end'),
+    confirmDateException: document.querySelector('#confirm-date-exception'),
+    dateExceptionList: document.querySelector('#date-exception-list'),
     error: document.querySelector('#availability-error'),
     loadStatus: document.querySelector('#load-status'),
     resetButton: document.querySelector('#reset-button'),
@@ -39,6 +46,7 @@
 
   let toastTimer;
   let schedule = createDefaultSchedule();
+  let dateExceptions = [];
 
   function createDefaultSchedule() {
     return {
@@ -50,7 +58,7 @@
         active: !['Saturday', 'Sunday'].includes(day),
         start: DEFAULT_START,
         end: DEFAULT_END,
-        blackout: [],
+        blackoutSlots: [],
         custom: false,
       })),
     };
@@ -81,18 +89,40 @@
         const slot = byDay.get(day);
         const start = slot?.start || defaultStart;
         const end = slot?.end || defaultEnd;
-        const blackout = Array.isArray(slot?.blackout) ? slot.blackout : [];
+        const blackoutSlots = Array.isArray(slot?.blackoutSlots)
+          ? slot.blackoutSlots
+          : Array.isArray(slot?.blackout)
+            ? slot.blackout
+            : [];
         return {
           day,
           active: slot ? slot.active !== false : false,
           start,
           end,
-          blackout: [...blackout],
-          custom:
-            start !== defaultStart || end !== defaultEnd || blackout.length > 0,
+          blackoutSlots: [...blackoutSlots],
+          custom: start !== defaultStart || end !== defaultEnd,
         };
       }),
     };
+  }
+
+  function normalizeDateExceptions(exceptions) {
+    return (Array.isArray(exceptions) ? exceptions : [])
+      .filter(
+        (exception) =>
+          exception &&
+          typeof exception.date === 'string' &&
+          typeof exception.start === 'string' &&
+          typeof exception.end === 'string',
+      )
+      .map(({ date, start, end }) => ({
+        date: date.slice(0, 10),
+        start: start.slice(0, 5),
+        end: end.slice(0, 5),
+      }))
+      .sort((a, b) =>
+        `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`),
+      );
   }
 
   async function requestAvailability(options = {}) {
@@ -138,44 +168,120 @@
     return { label, input };
   }
 
-  function renderBlackouts(slot, list, disabled) {
+  function renderUnavailableTags(slot, list) {
     list.replaceChildren();
-    slot.blackout.forEach((period, index) => {
-      const [startValue, endValue] = period.split('-');
-      const row = document.createElement('div');
-      row.className = 'blackout-row';
-
-      const start = document.createElement('input');
-      start.type = 'time';
-      start.value = startValue;
-      start.disabled = disabled;
-      start.setAttribute('aria-label', `${slot.day} unavailable period start`);
-
-      const end = document.createElement('input');
-      end.type = 'time';
-      end.value = endValue;
-      end.disabled = disabled;
-      end.setAttribute('aria-label', `${slot.day} unavailable period end`);
-
-      const update = () => {
-        slot.blackout[index] = `${start.value}-${end.value}`;
-      };
-      start.addEventListener('change', update);
-      end.addEventListener('change', update);
-
+    if (slot.blackoutSlots.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'unavailable-empty';
+      empty.textContent = 'No unavailable times added.';
+      list.append(empty);
+      return;
+    }
+    slot.blackoutSlots.forEach((period, index) => {
+      const tag = document.createElement('span');
+      tag.className = 'unavailable-tag';
+      const text = document.createElement('span');
+      text.textContent = period.replace('-', ' – ');
       const remove = document.createElement('button');
-      remove.className = 'mini-button remove-blackout';
+      remove.className = 'remove-unavailable';
       remove.type = 'button';
-      remove.disabled = disabled;
       remove.textContent = '×';
       remove.setAttribute('aria-label', `Remove ${slot.day} unavailable period`);
       remove.addEventListener('click', () => {
-        slot.blackout.splice(index, 1);
+        slot.blackoutSlots.splice(index, 1);
+        elements.error.textContent = '';
         renderCustomDays();
       });
-      row.append(start, end, remove);
-      list.append(row);
+      tag.append(text, remove);
+      list.append(tag);
     });
+  }
+
+  function periodsOverlap(periods, start, end) {
+    return periods.some((period) => {
+      const [existingStart, existingEnd] = period.split('-');
+      return start < existingEnd && existingStart < end;
+    });
+  }
+
+  function dateExceptionsOverlap(date, start, end) {
+    return dateExceptions.some(
+      (exception) =>
+        exception.date === date &&
+        start < exception.end &&
+        exception.start < end,
+    );
+  }
+
+  function formatExceptionDate(dateValue) {
+    const [year, month, day] = dateValue.split('-').map(Number);
+    return new Intl.DateTimeFormat(undefined, {
+      year: '2-digit',
+      month: '2-digit',
+      day: '2-digit',
+      timeZone: 'UTC',
+    }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+  }
+
+  function renderDateExceptions() {
+    elements.dateExceptionList.replaceChildren();
+    if (dateExceptions.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'date-exception-empty';
+      empty.textContent = 'No one-off exceptions added.';
+      elements.dateExceptionList.append(empty);
+      return;
+    }
+    dateExceptions.forEach((exception, index) => {
+      const tag = document.createElement('span');
+      tag.className = 'date-exception-tag';
+      const text = document.createElement('span');
+      text.textContent = `${formatExceptionDate(exception.date)} ${exception.start}–${exception.end}`;
+      const remove = document.createElement('button');
+      remove.className = 'remove-date-exception';
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.setAttribute(
+        'aria-label',
+        `Remove exception on ${exception.date} from ${exception.start} to ${exception.end}`,
+      );
+      remove.addEventListener('click', () => {
+        dateExceptions.splice(index, 1);
+        elements.error.textContent = '';
+        renderDateExceptions();
+      });
+      tag.append(text, remove);
+      elements.dateExceptionList.append(tag);
+    });
+  }
+
+  function setDateExceptionFormOpen(open) {
+    elements.addDateException.setAttribute('aria-expanded', String(open));
+    elements.dateExceptionForm.setAttribute('aria-hidden', String(!open));
+    elements.dateExceptionForm.classList.toggle('is-open', open);
+    if (open) elements.exceptionDate.focus();
+  }
+
+  function addDateException() {
+    const date = elements.exceptionDate.value;
+    const start = elements.exceptionStart.value;
+    const end = elements.exceptionEnd.value;
+    if (!date || !start || !end || start >= end) {
+      elements.error.textContent =
+        'Choose a date and an end time later than the exception start time.';
+      return;
+    }
+    if (dateExceptionsOverlap(date, start, end)) {
+      elements.error.textContent =
+        'One-off exceptions on the same date cannot overlap.';
+      return;
+    }
+    dateExceptions.push({ date, start, end });
+    dateExceptions = normalizeDateExceptions(dateExceptions);
+    elements.exceptionStart.value = '';
+    elements.exceptionEnd.value = '';
+    elements.error.textContent = '';
+    renderDateExceptions();
   }
 
   function renderCustomDays() {
@@ -225,28 +331,56 @@
       const blackoutHead = document.createElement('div');
       blackoutHead.className = 'blackout-heading';
       const blackoutTitle = document.createElement('span');
-      blackoutTitle.textContent = 'Unavailable periods';
+      blackoutTitle.textContent = 'Unavailable / Blocked Times';
+      const blackoutHelp = document.createElement('small');
+      blackoutHelp.textContent = 'Excluded without changing operating hours';
+      blackoutHead.append(blackoutTitle, blackoutHelp);
+
+      const unavailableControls = document.createElement('div');
+      unavailableControls.className = 'unavailable-controls';
+      const unavailableStart = createTimeField('Blocked start', '', () => {});
+      unavailableStart.input.required = false;
+      const unavailableEnd = createTimeField('Blocked end', '', () => {});
+      unavailableEnd.input.required = false;
       const addButton = document.createElement('button');
-      addButton.className = 'mini-button';
+      addButton.className = 'mini-button add-unavailable';
       addButton.type = 'button';
-      addButton.disabled = !slot.custom;
-      addButton.textContent = '+ Add break';
+      addButton.textContent = 'Add Unavailable Slot';
       addButton.addEventListener('click', () => {
-        slot.blackout.push('12:00-13:00');
+        const start = unavailableStart.input.value;
+        const end = unavailableEnd.input.value;
+        if (!start || !end || start >= end) {
+          elements.error.textContent = `${slot.day} blocked end time must be later than its start time.`;
+          return;
+        }
+        if (start < slot.start || end > slot.end) {
+          elements.error.textContent = `${slot.day} blocked times must fall within ${slot.start}–${slot.end}.`;
+          return;
+        }
+        if (periodsOverlap(slot.blackoutSlots, start, end)) {
+          elements.error.textContent = `${slot.day} blocked times cannot overlap.`;
+          return;
+        }
+        slot.blackoutSlots.push(`${start}-${end}`);
+        slot.blackoutSlots.sort();
+        elements.error.textContent = '';
         renderCustomDays();
       });
-      blackoutHead.append(blackoutTitle, addButton);
+      unavailableControls.append(
+        unavailableStart.label,
+        unavailableEnd.label,
+        addButton,
+      );
       const blackoutList = document.createElement('div');
       blackoutList.className = 'blackout-list';
-      renderBlackouts(slot, blackoutList, !slot.custom);
-      blackoutSection.append(blackoutHead, blackoutList);
+      renderUnavailableTags(slot, blackoutList);
+      blackoutSection.append(blackoutHead, unavailableControls, blackoutList);
 
       toggle.addEventListener('change', () => {
         slot.custom = toggle.checked;
         if (!slot.custom) {
           slot.start = elements.defaultStart.value;
           slot.end = elements.defaultEnd.value;
-          slot.blackout = [];
         }
         renderCustomDays();
       });
@@ -264,6 +398,7 @@
       input.checked = Boolean(slotFor(input.value)?.active);
     });
     renderCustomDays();
+    renderDateExceptions();
   }
 
   function applyDefaultHours() {
@@ -289,11 +424,29 @@
       if (!slot.start || !slot.end || slot.start >= slot.end) {
         return `${slot.day} end time must be later than its start time.`;
       }
-      for (const period of slot.blackout) {
+      for (const period of slot.blackoutSlots) {
         const [start, end] = period.split('-');
         if (!start || !end || start >= end || start < slot.start || end > slot.end) {
           return `${slot.day} unavailable periods must fall within operating hours.`;
         }
+      }
+      const sortedPeriods = [...slot.blackoutSlots].sort();
+      for (let index = 1; index < sortedPeriods.length; index += 1) {
+        const previousEnd = sortedPeriods[index - 1].split('-')[1];
+        const currentStart = sortedPeriods[index].split('-')[0];
+        if (previousEnd > currentStart) {
+          return `${slot.day} unavailable periods cannot overlap.`;
+        }
+      }
+    }
+    for (const exception of dateExceptions) {
+      if (
+        !exception.date ||
+        !exception.start ||
+        !exception.end ||
+        exception.start >= exception.end
+      ) {
+        return 'Each one-off exception needs a valid date and time range.';
       }
     }
     return '';
@@ -310,17 +463,23 @@
       const payload = {
         timeZone: schedule.timeZone,
         weeklySlots: schedule.weeklySlots.map(
-          ({ day, active, start, end, blackout }) => ({
+          ({ day, active, start, end, blackoutSlots }) => ({
             day,
             active,
             start,
             end,
-            blackout,
+            blackoutSlots,
           }),
         ),
+        dateSpecificExceptions: dateExceptions.map((exception) => ({
+          ...exception,
+        })),
       };
       const result = await requestAvailability({ method: 'PUT', body: payload });
       schedule = normalizeSchedule(result.availability);
+      dateExceptions = normalizeDateExceptions(
+        result.availability?.dateSpecificExceptions,
+      );
       renderSchedule();
       elements.loadStatus.textContent = 'Schedule saved';
       showToast('Weekly availability saved.');
@@ -337,6 +496,7 @@
     const timeZone = schedule.timeZone;
     schedule = createDefaultSchedule();
     schedule.timeZone = timeZone;
+    dateExceptions = [];
     elements.error.textContent = '';
     elements.loadStatus.textContent = 'Defaults restored locally';
     renderSchedule();
@@ -347,6 +507,12 @@
     elements.resetButton.addEventListener('click', resetSchedule);
     elements.defaultStart.addEventListener('change', applyDefaultHours);
     elements.defaultEnd.addEventListener('change', applyDefaultHours);
+    elements.addDateException.addEventListener('click', () => {
+      const open =
+        elements.addDateException.getAttribute('aria-expanded') !== 'true';
+      setDateExceptionFormOpen(open);
+    });
+    elements.confirmDateException.addEventListener('click', addDateException);
     elements.dayInputs.forEach((input) => {
       input.addEventListener('change', () => {
         const slot = slotFor(input.value);
@@ -362,9 +528,13 @@
 
   async function initialize() {
     bindEvents();
+    elements.exceptionDate.min = new Date().toISOString().slice(0, 10);
     try {
       const result = await requestAvailability();
       schedule = normalizeSchedule(result.availability);
+      dateExceptions = normalizeDateExceptions(
+        result.availability?.dateSpecificExceptions,
+      );
       elements.loadStatus.textContent = 'Schedule loaded';
     } catch (error) {
       elements.loadStatus.textContent = 'Using local defaults';

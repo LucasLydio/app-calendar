@@ -152,8 +152,7 @@
 }
 
 .time-input-wrap input,
-.custom-time-field input,
-.blackout-row input {
+.custom-time-field input {
   min-width: 0;
   color: var(--ink);
   background: white;
@@ -196,6 +195,26 @@
   padding: 0 var(--space-lg) var(--space-lg);
 }
 
+.unavailable-intro {
+  display: grid;
+  gap: 2px;
+  margin: 0 var(--space-lg) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(151, 216, 196, 0.12);
+  border-left: 2px solid var(--pearl-aqua);
+  border-radius: 0;
+}
+
+.unavailable-intro strong {
+  color: var(--color-dark);
+  font-size: 12px;
+}
+
+.unavailable-intro span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .custom-day-card {
   padding: var(--space-md);
   background: var(--color-lighter);
@@ -225,15 +244,13 @@
   font-size: 11px;
 }
 
-.custom-time-grid,
-.blackout-row {
+.custom-time-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-sm);
 }
 
-.custom-time-field input,
-.blackout-row input {
+.custom-time-field input {
   width: 100%;
   min-height: 40px;
   padding: 0 8px;
@@ -247,9 +264,9 @@
 
 .blackout-heading {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   margin-bottom: var(--space-sm);
 }
 
@@ -258,13 +275,38 @@
   font-weight: 700;
 }
 
-.blackout-list {
-  display: grid;
-  gap: 6px;
+.blackout-heading small,
+.unavailable-empty {
+  color: var(--muted);
+  font-size: 11px;
 }
 
-.blackout-row {
-  grid-template-columns: 1fr 1fr auto;
+.unavailable-controls {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) auto;
+  align-items: end;
+  gap: var(--space-sm);
+}
+
+.blackout-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-sm);
+}
+
+.unavailable-tag {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 9px;
+  color: var(--color-dark);
+  background: rgba(151, 216, 196, 0.2);
+  border: 1px solid rgba(64, 89, 173, 0.22);
+  border-radius: 0;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .mini-button {
@@ -278,14 +320,144 @@
   font-weight: 700;
 }
 
-.remove-blackout {
-  min-width: 38px;
-  color: var(--danger);
+.add-unavailable {
+  min-height: 40px;
 }
 
-.custom-day-card[data-custom='false'] .custom-time-grid,
-.custom-day-card[data-custom='false'] .blackout-section {
+.remove-unavailable {
+  width: 30px;
+  align-self: stretch;
+  color: var(--danger);
+  background: rgba(255, 255, 255, 0.72);
+  border: 0;
+  border-left: 1px solid rgba(64, 89, 173, 0.16);
+  border-radius: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.custom-day-card[data-custom='false'] .custom-time-grid {
   opacity: 0.52;
+}
+
+.date-exceptions {
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--line);
+}
+
+.date-exceptions-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+}
+
+.date-exceptions-heading h3 {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.date-exceptions-heading p:not(.eyebrow) {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.btn-secondary {
+  flex: 0 0 auto;
+  border-radius: 0;
+}
+
+.date-exception-form {
+  max-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  align-items: end;
+  gap: var(--space-sm);
+  overflow: hidden;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    max-height 180ms ease,
+    margin-top 180ms ease,
+    padding 180ms ease,
+    opacity 140ms ease,
+    transform 180ms ease,
+    visibility 180ms ease;
+}
+
+.date-exception-form.is-open {
+  max-height: 180px;
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  visibility: visible;
+  opacity: 1;
+  background: var(--color-lighter);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  transform: translateY(0);
+}
+
+.exception-field > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.exception-field input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.add-date-exception-button {
+  min-height: 40px;
+}
+
+.date-exception-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-md);
+}
+
+.date-exception-tag {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  color: var(--color-dark);
+  background: rgba(151, 216, 196, 0.18);
+  border: 1px solid rgba(64, 89, 173, 0.22);
+  border-radius: 0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.remove-date-exception {
+  width: 32px;
+  align-self: stretch;
+  color: var(--danger);
+  background: rgba(255, 255, 255, 0.72);
+  border: 0;
+  border-left: 1px solid rgba(64, 89, 173, 0.16);
+  border-radius: 0;
+  font-size: 18px;
+}
+
+.date-exception-empty {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .time-error {
@@ -315,6 +487,23 @@
   .availability-layout {
     grid-template-columns: 1fr;
   }
+
+  .date-exceptions-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .date-exception-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .date-exception-form.is-open {
+    max-height: 280px;
+  }
+
+  .add-date-exception-button {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 520px) {
@@ -326,16 +515,39 @@
   .time-card-header,
   .default-hours,
   .custom-day-list,
+  .unavailable-intro,
+  .date-exceptions,
   .time-actions {
     padding-right: var(--space-md);
     padding-left: var(--space-md);
+  }
+
+  .unavailable-intro {
+    margin-right: var(--space-md);
+    margin-left: var(--space-md);
   }
 
   .custom-hours summary {
     padding: 0 var(--space-md);
   }
 
-  .blackout-row {
-    grid-template-columns: 1fr 1fr 38px;
+  .unavailable-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .add-unavailable {
+    grid-column: 1 / -1;
+  }
+
+  .date-exception-form {
+    grid-template-columns: 1fr;
+  }
+
+  .date-exception-form.is-open {
+    max-height: 420px;
+  }
+
+  .btn-secondary {
+    width: 100%;
   }
 }

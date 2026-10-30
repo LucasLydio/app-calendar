@@ -1,6 +1,10 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../../../db/index.ts';
-import { availability, pushSubscriptions } from '../../../db/schema.ts';
+import {
+  availability,
+  dateSpecificExceptions,
+  pushSubscriptions,
+} from '../../../db/schema.ts';
 
 export { db };
 
@@ -31,10 +35,27 @@ export function appointmentFromRow(row) {
 }
 
 export async function getAvailability(database = db) {
-  const [row] = await database.select().from(availability).limit(1);
+  const [[row], exceptionRows] = await Promise.all([
+    database.select().from(availability).limit(1),
+    database
+      .select()
+      .from(dateSpecificExceptions)
+      .where(eq(dateSpecificExceptions.userId, 'default')),
+  ]);
   if (!row)
     throw new Error('Availability is missing from the database schema.');
-  return { timeZone: row.timeZone, weeklySlots: row.weeklySlots };
+  return {
+    timeZone: row.timeZone,
+    weeklySlots: row.weeklySlots,
+    dateSpecificExceptions: (Array.isArray(exceptionRows)
+      ? exceptionRows
+      : []
+    ).map((exception) => ({
+      date: String(exception.exceptionDate).slice(0, 10),
+      start: String(exception.startTime).slice(0, 5),
+      end: String(exception.endTime).slice(0, 5),
+    })),
+  };
 }
 
 export async function getSubscriptionsForUser(userId, database = db) {

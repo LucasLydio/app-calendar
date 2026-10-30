@@ -113,10 +113,71 @@
             <details class="custom-hours" id="custom-hours">
               <summary>
                 <span>Custom Hours per Day</span>
-                <small>Set different hours and unavailable periods</small>
+                <small>Set day hours and independent unavailable periods</small>
               </summary>
+              <div class="unavailable-intro">
+                <strong>Unavailable / Blocked Times</strong>
+                <span
+                  >Add excluded windows under any active day without changing
+                  its operating hours.</span
+                >
+              </div>
               <div id="custom-day-list" class="custom-day-list"></div>
             </details>
+
+            <section
+              class="date-exceptions"
+              aria-labelledby="date-exceptions-title"
+            >
+              <div class="date-exceptions-heading">
+                <div>
+                  <p class="eyebrow">One-off exceptions</p>
+                  <h3 id="date-exceptions-title">Specific date and time</h3>
+                  <p>These blocks take priority over the recurring schedule.</p>
+                </div>
+                <button
+                  class="btn btn-secondary button button-quiet"
+                  id="add-date-exception"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="date-exception-form"
+                >
+                  Select a Date and Time (Set unavailable)
+                </button>
+              </div>
+
+              <div
+                class="date-exception-form"
+                id="date-exception-form"
+                aria-hidden="true"
+              >
+                <label class="exception-field">
+                  <span>Date</span>
+                  <input id="exception-date" type="date" />
+                </label>
+                <label class="exception-field">
+                  <span>Start time</span>
+                  <input id="exception-start" type="time" />
+                </label>
+                <label class="exception-field">
+                  <span>End time</span>
+                  <input id="exception-end" type="time" />
+                </label>
+                <button
+                  class="button button-primary add-date-exception-button"
+                  id="confirm-date-exception"
+                  type="button"
+                >
+                  Add Exception
+                </button>
+              </div>
+
+              <div
+                class="date-exception-list"
+                id="date-exception-list"
+                aria-label="One-off exceptions"
+              ></div>
+            </section>
 
             <p class="form-error time-error" id="availability-error" role="alert"></p>
             <div class="time-actions">

@@ -52,7 +52,11 @@
         )
         .map((slot) => ({
           ...slot,
-          blackout: Array.isArray(slot.blackout) ? slot.blackout : [],
+          blackoutSlots: Array.isArray(slot.blackoutSlots)
+            ? slot.blackoutSlots
+            : Array.isArray(slot.blackout)
+              ? slot.blackout
+              : [],
         })),
       disabledDates: Array.isArray(value?.disabledDates)
         ? value.disabledDates
@@ -60,6 +64,16 @@
       blackoutHours: Array.isArray(value?.blackoutHours)
         ? value.blackoutHours
         : [],
+      dateSpecificExceptions: (Array.isArray(value?.dateSpecificExceptions)
+        ? value.dateSpecificExceptions
+        : []
+      ).filter(
+        (exception) =>
+          exception &&
+          typeof exception.date === 'string' &&
+          typeof exception.start === 'string' &&
+          typeof exception.end === 'string',
+      ),
     };
   }
 
@@ -176,8 +190,8 @@
           minutes + APPOINTMENT_DURATION_MINUTES <= end;
           minutes += APPOINTMENT_DURATION_MINUTES
         ) {
-          const overlapsBlackout = (Array.isArray(slot.blackout)
-            ? slot.blackout
+          const overlapsBlackout = (Array.isArray(slot.blackoutSlots)
+            ? slot.blackoutSlots
             : []
           ).some((period) => {
             const [blackoutStart, blackoutEnd] = period
@@ -207,6 +221,22 @@
         ) {
           return false;
         }
+        const [hour, minute] = time.split(':').map(Number);
+        const slotStart = hour * 60 + minute;
+        const slotEnd = slotStart + APPOINTMENT_DURATION_MINUTES;
+        const overlapsDateException = (
+          availability.dateSpecificExceptions ?? []
+        ).some((exception) => {
+          if (exception.date !== elements.date.value) return false;
+          const [startHour, startMinute] = exception.start
+            .split(':')
+            .map(Number);
+          const [endHour, endMinute] = exception.end.split(':').map(Number);
+          const exceptionStart = startHour * 60 + startMinute;
+          const exceptionEnd = endHour * 60 + endMinute;
+          return slotStart < exceptionEnd && exceptionStart < slotEnd;
+        });
+        if (overlapsDateException) return false;
         return !(bookedTimes ?? []).includes(time);
       });
 

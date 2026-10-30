@@ -25,7 +25,7 @@ export type WeeklySlot = {
   active: boolean;
   start: string;
   end: string;
-  blackout: string[];
+  blackoutSlots: string[];
 };
 
 export const availability = pgTable(
@@ -39,6 +39,39 @@ export const availability = pgTable(
       .defaultNow(),
   },
   (table) => [check('availability_singleton_check', sql`${table.singletonId} = 1`)],
+);
+
+export const dateSpecificExceptions = pgTable(
+  'date_specific_exceptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull().default('default'),
+    exceptionDate: date('exception_date').notNull(),
+    startTime: time('start_time').notNull(),
+    endTime: time('end_time').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      'date_specific_exceptions_time_check',
+      sql`${table.startTime} < ${table.endTime}`,
+    ),
+    uniqueIndex('date_specific_exceptions_unique_idx').on(
+      table.userId,
+      table.exceptionDate,
+      table.startTime,
+      table.endTime,
+    ),
+    index('date_specific_exceptions_user_date_idx').on(
+      table.userId,
+      table.exceptionDate,
+    ),
+  ],
 );
 
 export const appointments = pgTable(

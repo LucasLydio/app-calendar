@@ -48,9 +48,22 @@ function futureInZone(date, time, timeZone) {
   return `${date} ${time}` > current;
 }
 
-function slotIsAvailable(weeklySlots, date, time) {
+function slotIsAvailable(weeklySlots, dateSpecificExceptions, date, time) {
   const day = DAYS[new Date(`${date}T00:00:00.000Z`).getUTCDay()];
   const requestedStart = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+  const requestedEnd = requestedStart + DURATION_MINUTES;
+  const overlapsDateException = (Array.isArray(dateSpecificExceptions)
+    ? dateSpecificExceptions
+    : []
+  ).some((exception) => {
+    if (exception.date !== date) return false;
+    const [startHour, startMinute] = exception.start.split(':').map(Number);
+    const [endHour, endMinute] = exception.end.split(':').map(Number);
+    const exceptionStart = startHour * 60 + startMinute;
+    const exceptionEnd = endHour * 60 + endMinute;
+    return requestedStart < exceptionEnd && exceptionStart < requestedEnd;
+  });
+  if (overlapsDateException) return false;
   return (Array.isArray(weeklySlots) ? weeklySlots : []).some((slot) => {
     const slotDay = LEGACY_DAYS[slot.day] || slot.day;
     if (slotDay !== day || slot.active === false) return false;
@@ -58,18 +71,25 @@ function slotIsAvailable(weeklySlots, date, time) {
       Number(slot.start.slice(0, 2)) * 60 + Number(slot.start.slice(3));
     const slotEnd =
       Number(slot.end.slice(0, 2)) * 60 + Number(slot.end.slice(3));
-    const requestedEnd = requestedStart + DURATION_MINUTES;
-    const overlapsBlackout = (Array.isArray(slot.blackout)
-      ? slot.blackout
-      : []
-    ).some((period) => {
+    const blackoutSlots = Array.isArray(slot.blackoutSlots)
+      ? slot.blackoutSlots
+      : Array.isArray(slot.blackout)
+        ? slot.blackout
+        : [];
+    const overlapsBlackout = blackoutSlots
+      .filter((period) =>
+        /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(
+          period,
+        ),
+      )
+      .some((period) => {
       const [start, end] = period.split('-');
       const blackoutStart =
         Number(start.slice(0, 2)) * 60 + Number(start.slice(3));
       const blackoutEnd =
         Number(end.slice(0, 2)) * 60 + Number(end.slice(3));
-      return requestedStart < blackoutEnd && blackoutStart < requestedEnd;
-    });
+        return requestedStart < blackoutEnd && blackoutStart < requestedEnd;
+      });
     return (
       requestedStart >= slotStart &&
       requestedEnd <= slotEnd &&
@@ -170,7 +190,14 @@ export default async function handler(request) {
     }
 
     const currentAvailability = await getAvailability();
-    if (!slotIsAvailable(currentAvailability.weeklySlots, date, time)) {
+    if (
+      !slotIsAvailable(
+        currentAvailability.weeklySlots,
+        currentAvailability.dateSpecificExceptions,
+        date,
+        time,
+      )
+    ) {
       return jsonResponse(
         {
           error:

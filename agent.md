@@ -57,7 +57,8 @@ Drizzle migrations need a session-capable connection for migration locking. Set 
 
 ### Tables
 
-- `availability`: singleton row (`singleton_id = 1`), IANA time zone, JSON weekly slots, update timestamp. Each weekly slot uses `{ "day": "Monday", "active": true, "start": "09:00", "end": "17:00", "blackout": ["12:00-13:00"] }`. All seven days are represented; inactive days remain stored with `active: false`. The function normalizes legacy short day keys on read.
+- `availability`: singleton row (`singleton_id = 1`), IANA time zone, JSON weekly slots, update timestamp. Each weekly slot uses `{ "day": "Monday", "active": true, "start": "09:00", "end": "17:00", "blackoutSlots": ["12:00-13:00", "15:00-15:30"] }`. Blocked slots are independent exclusions within operating hours. All seven days are represented; inactive days remain stored with `active: false`. The function normalizes legacy short day keys and the former `blackout` field on read.
+- `date_specific_exceptions`: one-off unavailable windows with UUID, singleton owner ID (`default` until manager authentication exists), exception date, start/end times, and timestamps. A user/date index supports booking lookups. These exceptions take absolute priority over recurring `weeklySlots` and recurring `blackoutSlots`.
 - `appointments`: customer and user IDs, service, date/time, status (`pending`, `approved`, `rejected`), calendar-sync state/error/event metadata, and decision/creation timestamps. Active appointments have a partial unique index on date/time.
 - `push_subscriptions`: browser ID, unique push endpoint, JSON Web Push keys, user ID, timestamps.
 - `calendar_outbox`: queued calendar actions with status, attempts, retry time, lock, error, event ID, and appointment foreign key.
@@ -67,8 +68,8 @@ Drizzle migrations need a session-capable connection for migration locking. Set 
 Routes are configured in `netlify.toml`. Netlify function handlers use ES-module default exports; do not mix V1 `exports.handler` syntax into these functions. JSON routes use helpers in `netlify/functions/lib/http.mjs`. Server errors are logged with nested causes and return a generic public message; avoid exposing SQL, credentials, or internal exception details to callers.
 
 - **`GET /api/health`** -> `health.mjs`; does not access the database. Returns `{"status":"ok"}`.
-- **`GET /api/availability`** -> returns `{"availability":{"timeZone":"...","weeklySlots":[],"disabledDates":[],"blackoutHours":[]}}`; array fields are always defined. If no row exists it returns all seven days with UTC weekdays active from 09:00–17:00.
-- **`POST|PUT /api/availability`** -> body `{ "timeZone": "Area/Location", "weeklySlots": [{"day":"Monday","active":true,"start":"09:00","end":"17:00","blackout":["12:00-13:00"]}] }`; validates the IANA timezone, unique weekdays, time ranges, and blackout periods, upserts the singleton row, and returns the normalized saved availability. Legacy short weekday keys remain accepted during transition.
+- **`GET /api/availability`** -> returns `{"availability":{"timeZone":"...","weeklySlots":[],"dateSpecificExceptions":[],"disabledDates":[],"blackoutHours":[]}}`; array fields are always defined. If no availability row exists it returns all seven days with UTC weekdays active from 09:00–17:00.
+- **`POST|PUT /api/availability`** -> body `{ "timeZone": "Area/Location", "weeklySlots": [{"day":"Monday","active":true,"start":"09:00","end":"17:00","blackoutSlots":["12:00-13:00"]}], "dateSpecificExceptions": [{"date":"2026-11-03","start":"13:00","end":"14:00"}] }`; validates the IANA timezone, recurring schedule, and non-overlapping one-off exceptions, then transactionally replaces the singleton schedule and exception rows. Legacy short weekday keys and stored `blackout` arrays remain accepted during transition.
 - **`GET /time`** -> serves `time.html`, the manager availability editor. The build copies `time.html`, `time.css`, and `time.js` into `public/`.
 - **`GET /api/appointments?status=pending|approved|rejected|all`** -> returns `{ "appointments": [...] }`; status defaults to `pending`. This is a manager-facing listing and must not be publicly exposed without manager authentication.
 - **`GET /api/appointments?view=slots&date=YYYY-MM-DD`** (also accepts `?date=YYYY-MM-DD`) -> always returns `{ "bookedSlots": ["HH:mm", ...] }` for pending/approved bookings, including an empty array when none exist.
@@ -128,11 +129,11 @@ Never hardcode or commit secret values, include them in logs, or copy values fro
 
 ### Not yet verified / next steps
 
-- **Remote database:** earlier local attempts to reach Supabase pooler ports timed out. Do not assume the generated migration or seed has been applied. Verify all four tables in the intended Supabase project and apply `drizzle/0000_silky_angel.sql` plus `supabase/seed.sql` where needed.
+- **Remote database:** earlier local attempts to reach Supabase pooler ports timed out. Do not assume generated migrations or the seed have been applied. Verify all five tables in the intended Supabase project; apply `drizzle/0000_silky_angel.sql`, `drizzle/0001_luxuriant_lilith.sql`, and `supabase/seed.sql` where needed.
 - **Production endpoints:** after deploy, test `/api/health`, `/api/availability`, public booking in `book.html`, appointment listing/actions only after authorization is addressed, and push subscription/delivery.
 - **Push:** test subscription and notifications across supported browsers; verify VAPID values and the internal dispatch token in Netlify.
 - **Calendar outbox:** scheduled worker is configured once per minute; verify actual retries and successful Google Calendar sync in production.
-- **Availability UI:** verify `/time` against the deployed database, including custom day hours, blackout periods, direct navigation, and narrow-screen layouts.
+- **Availability UI:** `/time` includes a dedicated One-Off Exceptions list below “Select a Date and Time (Set unavailable).” Verify custom day hours, recurring blackout periods, date-specific exceptions, direct navigation, and narrow-screen layouts against the deployed database.
 - **Authorization:** implement and test manager authentication before relying on manager endpoints in production.
 
 For production diagnostics, use **Netlify Dashboard > Functions > [function name] > Logs**. Confirm that environment-variable edits are followed by a new deploy.
