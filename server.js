@@ -136,6 +136,22 @@ const vapidPublicKey = configureVapid();
 app.use(express.json({ limit: '32kb' }));
 app.use(express.static(__dirname));
 
+app.get('/realtime-config.js', (_request, response) => {
+  const config = {
+    supabaseUrl:
+      process.env.SUPABASE_URL ||
+      'https://ywbgrnbkvuiftcfhzhjz.supabase.co',
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
+  };
+  response.set({
+    'Content-Type': 'application/javascript; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  return response.send(
+    `window.__DAYBOOK_PUBLIC_CONFIG__ = Object.freeze(${JSON.stringify(config)});`,
+  );
+});
+
 app.get('/', (_request, response) => {
   return response.sendFile(path.join(__dirname, 'index.html'));
 });

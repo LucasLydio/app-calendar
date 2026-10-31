@@ -6,7 +6,7 @@ Daybook is a serverless appointment-management and booking MVP. The deployed pro
 
 The deployed architecture is:
 
-- **Frontend:** static `index.html` management interface, `book.html` public booking page, `time.html` availability-management page, and `services.html` service-management page. Admin pages use a responsive sticky top navigation bar with Appointments, Availability, and Services links; the public booking page intentionally has no navigation or header controls. Shared tokens and dashboard styles are in `styles.css`; page behavior/styles are split into root-level CSS and JavaScript files. `service-worker.js` supports browser push notifications.
+- **Frontend:** static `index.html` management interface, `book.html` public booking page, `time.html` availability-management page, and `services.html` service-management page. Admin pages use a responsive sticky top navigation bar with Appointments, Availability, and Services links; the public booking page intentionally has no navigation or header controls. Shared tokens and dashboard styles are in `styles.css`; page behavior/styles are split into root-level CSS and JavaScript files. `index.html` loads `@supabase/supabase-js@2` for direct appointment Realtime updates, while `service-worker.js` supports browser push notifications.
 - **Backend:** ES-module Netlify Functions in `netlify/functions/`, bundled by esbuild. `netlify.toml` maps public `/api/*` paths to function endpoints and serves the static site from `public/`.
 - **Database:** Supabase Postgres accessed through Drizzle ORM and the `postgres` (postgres.js) driver.
 - **Legacy/local server:** `server.js` and `calendar_worker.js` are retained for local/legacy development. Netlify publishes the static pages and functions; do not assume the Express server is the deployed API.
@@ -46,6 +46,16 @@ The deployed app uses Supabase's **transaction-mode pooler** on port `6543`. In 
 `DATABASE_URL` must be configured in Netlify for Functions and in local `.env`. Do not commit credentials. The current client logs if `DATABASE_URL` is absent and falls back to a deliberately invalid local URL so importing the module itself does not throw; actual DB queries will still fail. Never treat this fallback as a valid connection.
 
 Drizzle migrations need a session-capable connection for migration locking. Set local `MIGRATION_DATABASE_URL` to Supabase's session-mode pooler connection (typically port `5432`) for CLI migrations. `drizzle.config.ts` prefers `MIGRATION_DATABASE_URL` and falls back to `DATABASE_URL`. If network access or the pooler prevents CLI migration, review and apply generated SQL with Supabase SQL Editor. Verify tables in the intended Supabase project after applying; generating a migration does not apply it remotely.
+
+### Browser Realtime connection
+
+The admin appointments dashboard establishes a direct browser-to-Supabase Realtime WebSocket connection. `scripts/build.mjs` generates `public/realtime-config.js` from `SUPABASE_URL` and `SUPABASE_ANON_KEY`; the legacy local Express server exposes the same public configuration at `/realtime-config.js`. `index.html` loads that configuration, the Supabase CDN bundle, and then `script.js`, all with `defer` so initialization order is deterministic.
+
+`script.js` subscribes to `postgres_changes` for all `INSERT`, `UPDATE`, and `DELETE` events on `public.appointments`. It maps database snake-case columns to the dashboard's existing camel-case view model, updates the matching UI row, and retains `/api/appointments` as the initial load, mutation path, and reconciliation fallback. A missing public key or unavailable CDN disables only Realtime; REST behavior remains functional.
+
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` are intentionally public browser configuration. `DATABASE_URL` is a secret server-only Postgres transaction-pooler connection on port `6543`; it must never be emitted into HTML, JavaScript, build artifacts, or browser logs. Realtime connects to the Supabase project URL and never proxies through Netlify Functions or the database pooler.
+
+The `appointments` table must be enabled in **Supabase Dashboard > Database > Publications > supabase_realtime**. Default replica identity is sufficient for the current delete handler because it only needs the primary key. Use `ALTER TABLE public.appointments REPLICA IDENTITY FULL;` only when consumers require complete previous-row values for updates or deletes. Realtime also honors database authorization: an anon browser can receive only rows permitted by applicable RLS policies. Do not add a broad anonymous `SELECT` policy containing customer data; authenticate the admin dashboard and define a manager-scoped policy before production exposure.
 
 ### Drizzle files
 
@@ -112,6 +122,8 @@ Set local variables in ignored `.env`; configure deployed runtime values in **Ne
 
 Important keys:
 
+- `SUPABASE_URL`: public Supabase project URL used by the browser Realtime client.
+- `SUPABASE_ANON_KEY`: public Supabase anon/publishable key used by the browser Realtime client. It is not a substitute for RLS or admin authentication.
 - `DATABASE_URL`: Supabase transaction-mode pooler URL (port `6543`).
 - `MIGRATION_DATABASE_URL`: local Drizzle migration connection, preferably Supabase session-mode pooler (port `5432`).
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`: Web Push. Public/private keys must be a matching VAPID pair; only the public key is returned to clients. Keep the private key in Netlify Functions secrets. `VAPID_SUBJECT` should be a valid `mailto:` or HTTPS contact URI.
@@ -130,6 +142,7 @@ Never hardcode or commit secret values, include them in logs, or copy values fro
 - Service CRUD is implemented through `services.html` and `netlify/functions/services.mjs`. The public `book.html` flow now loads this catalog first, keeps date/time controls disabled until a service is selected, and calculates availability using the selected duration on a 30-minute start grid. The public page remains isolated from admin navigation.
 - `book.html` stores device-local booking history under the exact `localStorage` key `my_appointments` as a JSON array of `{ "appointmentId", "serviceName", "date", "time", "status", "message?" }`. Guarded reads/writes prevent storage or parsing failures from breaking booking. Database state remains authoritative and refreshes this history through the batch IDs endpoint.
 - Push permission is requested only from the explicit **Enable status notifications** history action. Once granted, the client registers the root service worker, obtains the public VAPID key from `/api/push`, and associates the subscription with every locally saved appointment. Admin approve/reject actions queue background delivery; push-gateway 404/410 responses retire expired endpoints.
+- The appointments dashboard uses a direct Supabase Realtime channel for instant insert, update, and delete rendering. REST loading and actions remain intact, and the dashboard performs a REST reconciliation after the channel subscribes to close the startup race window.
 - Transaction-pooler compatibility guards are in `db/index.ts` (`prepare: false`, SSL required, one connection); client timeouts are configured.
 - Drizzle migration config and generated SQL are in place; migration CLI prefers `MIGRATION_DATABASE_URL`.
 - Netlify handlers use ES module default exports. Shared error handling logs server-side causes and returns safe JSON errors.
@@ -146,5 +159,6 @@ Never hardcode or commit secret values, include them in logs, or copy values fro
 - **Calendar outbox:** scheduled worker is configured once per minute; verify actual retries and successful Google Calendar sync in production.
 - **Availability UI:** `/time` includes a dedicated One-Off Exceptions list below “Select a Date and Time (Set unavailable).” Verify custom day hours, recurring blackout periods, date-specific exceptions, direct navigation, and narrow-screen layouts against the deployed database.
 - **Authorization:** implement and test manager authentication before relying on manager endpoints in production.
+- **Realtime:** configure the public Supabase URL/anon key at build time, add `public.appointments` to the `supabase_realtime` publication, and test INSERT/UPDATE/DELETE delivery under the authenticated manager RLS policy. Enable `REPLICA IDENTITY FULL` only if full old-row payloads are needed.
 
 For production diagnostics, use **Netlify Dashboard > Functions > [function name] > Logs**. Confirm that environment-variable edits are followed by a new deploy.

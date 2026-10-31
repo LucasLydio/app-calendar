@@ -32,6 +32,8 @@
   };
   let activeView = 'pending';
   let toastTimer;
+  let supabaseClient;
+  let appointmentChannel;
 
   async function apiRequest(path, options = {}) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -56,7 +58,9 @@
   }
 
   function availabilityFromApi(availability) {
-    const slots = availability.weeklySlots || [];
+    const slots = Array.isArray(availability?.weeklySlots)
+      ? availability.weeklySlots
+      : [];
     const dayKeys = {
       Monday: 'mon',
       Tuesday: 'tue',
@@ -73,7 +77,7 @@
       ],
       start: activeSlots[0]?.start || '09:00',
       end: activeSlots[0]?.end || '17:00',
-      timeZone: availability.timeZone || 'UTC',
+      timeZone: availability?.timeZone || 'UTC',
     };
   }
 
@@ -86,9 +90,13 @@
       ]);
 
     if (allResult.status === 'fulfilled') {
-      state.appointments = allResult.value.appointments;
+      state.appointments = normalizeAppointments(
+        allResult.value?.appointments,
+      );
     } else if (pendingResult.status === 'fulfilled') {
-      state.appointments = pendingResult.value.appointments;
+      state.appointments = normalizeAppointments(
+        pendingResult.value?.appointments,
+      );
     }
 
     if (availabilityResult.status === 'fulfilled') {
@@ -167,7 +175,9 @@
   }
 
   function formatAppointmentDate(dateValue) {
+    if (typeof dateValue !== 'string' || !dateValue) return 'Date unavailable';
     const date = new Date(`${dateValue}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return 'Date unavailable';
     return new Intl.DateTimeFormat(undefined, {
       weekday: 'short',
       month: 'short',
@@ -187,7 +197,7 @@
   }
 
   function initialsFor(name) {
-    return name
+    return String(name || '?')
       .split(/\s+/)
       .slice(0, 2)
       .map((part) => part.charAt(0))
@@ -204,6 +214,7 @@
 
   function createAppointmentRow(appointment) {
     const row = createElement('article', 'appointment');
+    row.dataset.appointmentId = appointment.id;
     const person = createElement('div', 'person');
     const initials = createElement(
       'span',
@@ -286,7 +297,10 @@
   }
 
   function renderAppointments() {
-    const appointments = state.appointments.filter((item) =>
+    const allAppointments = Array.isArray(state.appointments)
+      ? state.appointments
+      : [];
+    const appointments = allAppointments.filter((item) =>
       activeView === 'pending'
         ? item.status === 'pending'
         : item.status !== 'pending',
@@ -326,8 +340,7 @@
         ? 'Requests need your decision'
         : 'Recently reviewed requests';
     elements.queueCount.textContent = String(
-      state.appointments.filter((item) => item.status === 'pending')
-        .length,
+      allAppointments.filter((item) => item.status === 'pending').length,
     );
     elements.queueCount.setAttribute(
       'aria-label',
@@ -335,8 +348,7 @@
     );
     elements.pendingTotal.textContent = elements.queueCount.textContent;
     elements.approvedTotal.textContent = String(
-      state.appointments.filter((item) => item.status === 'approved')
-        .length,
+      allAppointments.filter((item) => item.status === 'approved').length,
     );
   }
 
@@ -369,6 +381,170 @@
     toastTimer = window.setTimeout(
       () => elements.toast.classList.remove('is-visible'),
       3200,
+    );
+  }
+
+  function normalizeAppointment(value, previous = {}) {
+    if (!value || typeof value !== 'object') return null;
+    const id = value.id ?? previous.id;
+    if (typeof id !== 'string' || !id) return null;
+    const statusCandidate = value.status ?? previous.status ?? 'pending';
+    return {
+      ...previous,
+      id,
+      userId: value.user_id ?? value.userId ?? previous.userId ?? null,
+      name:
+        value.customer_name ??
+        value.name ??
+        previous.name ??
+        'Unknown client',
+      email:
+        value.customer_email ??
+        value.email ??
+        previous.email ??
+        'Email unavailable',
+      service:
+        value.service_name ??
+        value.serviceName ??
+        value.service ??
+        previous.service ??
+        'Appointment',
+      serviceId:
+        value.service_id ?? value.serviceId ?? previous.serviceId ?? null,
+      servicePrice:
+        value.service_price ??
+        value.servicePrice ??
+        previous.servicePrice ??
+        null,
+      serviceDuration:
+        value.service_duration ??
+        value.serviceDuration ??
+        previous.serviceDuration ??
+        null,
+      date: String(
+        value.appointment_date ?? value.date ?? previous.date ?? '',
+      ).slice(0, 10),
+      time: String(
+        value.appointment_time ?? value.time ?? previous.time ?? '',
+      ).slice(0, 5),
+      status: ['pending', 'approved', 'rejected'].includes(statusCandidate)
+        ? statusCandidate
+        : 'pending',
+      calendarSyncStatus:
+        value.calendar_sync_status ??
+        value.calendarSyncStatus ??
+        previous.calendarSyncStatus ??
+        'not_queued',
+    };
+  }
+
+  function normalizeAppointments(values) {
+    return (Array.isArray(values) ? values : [])
+      .map((value) => normalizeAppointment(value))
+      .filter(Boolean);
+  }
+
+  function handleRealtimeAppointmentChange(payload) {
+    const eventType = String(payload?.eventType || '').toUpperCase();
+    const oldId = payload?.old?.id;
+
+    if (eventType === 'DELETE') {
+      if (typeof oldId !== 'string' || !oldId) return;
+      state.appointments = (state.appointments ?? []).filter(
+        (appointment) => appointment?.id !== oldId,
+      );
+      renderAppointments();
+      return;
+    }
+
+    if (!['INSERT', 'UPDATE'].includes(eventType)) return;
+    const incomingId = payload?.new?.id;
+    if (typeof incomingId !== 'string' || !incomingId) return;
+    const currentAppointments = Array.isArray(state.appointments)
+      ? state.appointments
+      : [];
+    const existingIndex = currentAppointments.findIndex(
+      (appointment) => appointment?.id === incomingId,
+    );
+    const existing =
+      existingIndex >= 0 ? currentAppointments[existingIndex] : undefined;
+    const normalized = normalizeAppointment(payload.new, existing);
+    if (!normalized) return;
+
+    if (existingIndex >= 0) {
+      state.appointments = currentAppointments.map((appointment, index) =>
+        index === existingIndex ? normalized : appointment,
+      );
+    } else {
+      state.appointments = [normalized, ...currentAppointments];
+      if (eventType === 'INSERT') showToast('New appointment received.');
+    }
+    renderAppointments();
+  }
+
+  function setupAppointmentRealtime() {
+    const config = window.__DAYBOOK_PUBLIC_CONFIG__ || {};
+    const supabaseUrl =
+      typeof config.supabaseUrl === 'string' ? config.supabaseUrl.trim() : '';
+    const supabaseAnonKey =
+      typeof config.supabaseAnonKey === 'string'
+        ? config.supabaseAnonKey.trim()
+        : '';
+    if (
+      !supabaseUrl.startsWith('https://') ||
+      !supabaseAnonKey ||
+      supabaseAnonKey === 'YOUR_PUBLIC_SUPABASE_ANON_KEY'
+    ) {
+      console.warn(
+        'Supabase Realtime is not configured; REST appointment loading remains active.',
+      );
+      return;
+    }
+    if (!window.supabase?.createClient) {
+      console.warn(
+        'Supabase JavaScript failed to load; REST appointment loading remains active.',
+      );
+      return;
+    }
+
+    supabaseClient = window.supabase.createClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      },
+    );
+    appointmentChannel = supabaseClient
+      .channel('admin-appointments-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'appointments' },
+        handleRealtimeAppointmentChange,
+      )
+      .subscribe((status) => {
+        console.log('Supabase Realtime Status:', status);
+        if (status === 'SUBSCRIBED') {
+          void loadBackendData();
+        } else if (['CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          console.warn(
+            'Supabase Realtime is unavailable; REST appointment actions remain active.',
+          );
+        }
+      });
+
+    window.addEventListener(
+      'pagehide',
+      () => {
+        if (appointmentChannel) {
+          void supabaseClient.removeChannel(appointmentChannel);
+          appointmentChannel = undefined;
+        }
+      },
+      { once: true },
     );
   }
 
@@ -471,6 +647,7 @@
     renderAppointments();
     bindEvents();
     await Promise.all([loadBackendData(), setupPushNotifications()]);
+    setupAppointmentRealtime();
   }
 
   void initialize();
