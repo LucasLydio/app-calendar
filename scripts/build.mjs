@@ -17,6 +17,9 @@ for (const file of [
   'time.html',
   'time.css',
   'time.js',
+  'services.html',
+  'services.css',
+  'services.js',
   'service-worker.js',
   '_redirects',
 ]) {

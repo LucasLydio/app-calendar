@@ -103,7 +103,9 @@ async function syncGoogleAppointment(appointment, timeZone, accessToken) {
   const event = buildGoogleEventPayload(
     appointment,
     timeZone,
-    Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60,
+    appointment.serviceDuration ||
+      Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) ||
+      60,
   );
   try {
     response = await fetch(base, {
@@ -159,6 +161,7 @@ async function claimJobs() {
     SELECT claimed.id AS job_id, claimed.attempts, claimed.appointment_id,
            appointments.id, appointments.user_id, appointments.customer_name,
            appointments.customer_email, appointments.service,
+           appointments.service_duration,
            appointments.appointment_date, appointments.appointment_time,
            appointments.status AS appointment_status
     FROM claimed
@@ -173,6 +176,9 @@ function appointmentFromJob(row) {
     name: row.customer_name,
     email: row.customer_email,
     service: row.service,
+    serviceDuration: Number.isInteger(row.service_duration)
+      ? row.service_duration
+      : null,
     date: String(row.appointment_date).slice(0, 10),
     time: String(row.appointment_time).slice(0, 5),
     status: row.appointment_status,

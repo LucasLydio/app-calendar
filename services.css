@@ -1,0 +1,238 @@
+.services-shell {
+  background:
+    linear-gradient(135deg, rgba(151, 216, 196, 0.08), transparent 34%),
+    var(--paper);
+}
+
+.services-workspace {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.services-heading {
+  padding: var(--space-xlg) var(--space-lg) var(--space-lg);
+}
+
+.services-heading h1 {
+  margin: 4px 0 8px;
+  color: var(--ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(38px, 6vw, 58px);
+  font-weight: 400;
+  line-height: 1;
+}
+
+.services-heading > p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.services-card {
+  margin: 0 var(--space-lg) var(--space-lg);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: var(--shadow-lighter);
+}
+
+.services-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--line);
+}
+
+.services-card-header h2 {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 30px;
+  font-weight: 400;
+}
+
+.service-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(150px, 1fr) minmax(170px, 1fr) auto;
+  align-items: end;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+}
+
+.service-field {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.service-field input,
+.service-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.service-field input:focus,
+.service-field select:focus {
+  border-color: var(--blue-grey);
+  outline: 3px solid rgba(107, 154, 196, 0.2);
+  outline-offset: 0;
+}
+
+.service-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.service-form-actions .button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.services-error {
+  min-height: 0;
+  margin: 0;
+  padding: 0 var(--space-lg);
+}
+
+.services-error:not(:empty) {
+  padding-bottom: var(--space-lg);
+}
+
+.service-count {
+  min-width: 34px;
+  padding: 7px 10px;
+  color: var(--sapphire);
+  background: rgba(151, 216, 196, 0.2);
+  border: 1px solid rgba(64, 89, 173, 0.18);
+  border-radius: 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.services-status {
+  padding: var(--space-lg);
+  color: var(--muted);
+}
+
+.services-status.is-error {
+  color: #9c2f2f;
+}
+
+.services-table-wrap {
+  overflow-x: auto;
+}
+
+.services-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 0;
+}
+
+.services-table th,
+.services-table td {
+  padding: 14px var(--space-lg);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.services-table th {
+  color: var(--muted);
+  background: rgba(239, 242, 241, 0.55);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.services-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.service-name-cell {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.service-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.service-action {
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--sapphire);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.service-action:hover {
+  background: rgba(151, 216, 196, 0.16);
+  border-color: var(--blue-grey);
+}
+
+.service-action.delete-service {
+  color: #9c2f2f;
+}
+
+@media (max-width: 900px) {
+  .service-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .service-form-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .services-heading,
+  .services-card-header,
+  .service-form,
+  .services-table th,
+  .services-table td {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+
+  .services-card {
+    margin-right: var(--space-md);
+    margin-left: var(--space-md);
+  }
+
+  .service-form {
+    grid-template-columns: 1fr;
+  }
+
+  .service-form-actions {
+    grid-column: auto;
+    flex-wrap: wrap;
+  }
+
+  .services-table th,
+  .services-table td {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .service-actions {
+    flex-direction: column;
+  }
+}

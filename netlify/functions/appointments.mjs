@@ -1,6 +1,9 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import { appointments } from '../../db/schema.ts';
+import {
+  appointments,
+  services as servicesTable,
+} from '../../db/schema.ts';
 import { appointmentFromRow, db, getAvailability } from './lib/db.mjs';
 import { errorResponse, jsonResponse, readJson } from './lib/http.mjs';
 
@@ -23,8 +26,11 @@ const LEGACY_DAYS = {
   sat: 'Saturday',
 };
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
-const DURATION_MINUTES =
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LEGACY_DURATION_MINUTES =
   Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60;
+const SLOT_INTERVAL_MINUTES = 30;
 
 function isValidDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
@@ -48,10 +54,16 @@ function futureInZone(date, time, timeZone) {
   return `${date} ${time}` > current;
 }
 
-function slotIsAvailable(weeklySlots, dateSpecificExceptions, date, time) {
+function slotIsAvailable(
+  weeklySlots,
+  dateSpecificExceptions,
+  date,
+  time,
+  durationMinutes,
+) {
   const day = DAYS[new Date(`${date}T00:00:00.000Z`).getUTCDay()];
   const requestedStart = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-  const requestedEnd = requestedStart + DURATION_MINUTES;
+  const requestedEnd = requestedStart + durationMinutes;
   const overlapsDateException = (Array.isArray(dateSpecificExceptions)
     ? dateSpecificExceptions
     : []
@@ -93,10 +105,14 @@ function slotIsAvailable(weeklySlots, dateSpecificExceptions, date, time) {
     return (
       requestedStart >= slotStart &&
       requestedEnd <= slotEnd &&
-      (requestedStart - slotStart) % DURATION_MINUTES === 0 &&
+      (requestedStart - slotStart) % SLOT_INTERVAL_MINUTES === 0 &&
       !overlapsBlackout
     );
   });
+}
+
+function minutesFromTime(value) {
+  return Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
 }
 
 export default async function handler(request) {
@@ -104,6 +120,39 @@ export default async function handler(request) {
     const url = new URL(request.url);
 
     if (request.method === 'GET') {
+      const idsParameter = url.searchParams.get('ids');
+      if (idsParameter !== null) {
+        const ids = [...new Set(
+          idsParameter
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean),
+        )];
+        if (
+          ids.length === 0 ||
+          ids.length > 50 ||
+          ids.some((id) => !/^[A-Za-z0-9_-]{1,120}$/.test(id))
+        ) {
+          return jsonResponse(
+            { error: 'ids must contain 1 to 50 valid appointment IDs.' },
+            400,
+          );
+        }
+        const rows = await db
+          .select()
+          .from(appointments)
+          .where(inArray(appointments.id, ids));
+        return jsonResponse({
+          appointments: (Array.isArray(rows) ? rows : []).map((row) => ({
+            id: row.id,
+            serviceName: row.serviceName || row.service,
+            date: String(row.requestedDate).slice(0, 10),
+            time: String(row.requestedTime).slice(0, 5),
+            status: row.status,
+            ...(row.rejectionReason && { message: row.rejectionReason }),
+          })),
+        });
+      }
       const requestedDate = url.searchParams.get('date');
       const slotView =
         url.searchParams.get('view') === 'slots' ||
@@ -117,7 +166,10 @@ export default async function handler(request) {
           );
         }
         const bookedRows = await db
-          .select({ requestedTime: appointments.requestedTime })
+          .select({
+            requestedTime: appointments.requestedTime,
+            serviceDuration: appointments.serviceDuration,
+          })
           .from(appointments)
           .where(
             and(
@@ -125,12 +177,17 @@ export default async function handler(request) {
               inArray(appointments.status, ['pending', 'approved']),
             ),
           );
-        const bookedSlots = (Array.isArray(bookedRows) ? bookedRows : []).map(
-          (row) =>
-            String(row.requestedTime).slice(0, 5),
-        );
+        const normalizedRows = Array.isArray(bookedRows) ? bookedRows : [];
+        const bookedIntervals = normalizedRows.map((row) => ({
+          time: String(row.requestedTime).slice(0, 5),
+          durationMinutes: Number.isInteger(row.serviceDuration)
+            ? row.serviceDuration
+            : LEGACY_DURATION_MINUTES,
+        }));
+        const bookedSlots = bookedIntervals.map((interval) => interval.time);
         return jsonResponse({
           bookedSlots,
+          bookedIntervals,
         });
       }
       const status = url.searchParams.get('status') || 'pending';
@@ -164,12 +221,14 @@ export default async function handler(request) {
     const body = await readJson(request);
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const email = typeof body.email === 'string' ? body.email.trim() : '';
-    const { date, time } = body;
+    const { date, time, serviceId } = body;
     if (
       !name ||
       name.length > 120 ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
       email.length > 254 ||
+      typeof serviceId !== 'string' ||
+      !UUID_PATTERN.test(serviceId) ||
       !isValidDate(date) ||
       typeof time !== 'string' ||
       !TIME_PATTERN.test(time)
@@ -177,7 +236,7 @@ export default async function handler(request) {
       return jsonResponse(
         {
           error:
-            'name, valid email, date (YYYY-MM-DD), and time (HH:mm) are required.',
+            'name, valid email, serviceId, date (YYYY-MM-DD), and time (HH:mm) are required.',
         },
         400,
       );
@@ -189,6 +248,19 @@ export default async function handler(request) {
       return jsonResponse({ error: 'userId must be a non-empty string.' }, 400);
     }
 
+    const [selectedService] = await db
+      .select()
+      .from(servicesTable)
+      .where(eq(servicesTable.id, serviceId))
+      .limit(1);
+    if (!selectedService) {
+      return jsonResponse(
+        { error: 'The selected service is not available.' },
+        400,
+      );
+    }
+
+    const durationMinutes = selectedService.durationMinutes;
     const currentAvailability = await getAvailability();
     if (
       !slotIsAvailable(
@@ -196,6 +268,7 @@ export default async function handler(request) {
         currentAvailability.dateSpecificExceptions,
         date,
         time,
+        durationMinutes,
       )
     ) {
       return jsonResponse(
@@ -218,22 +291,73 @@ export default async function handler(request) {
       userId: body.userId?.trim() || `user-${crypto.randomUUID()}`,
       name,
       email,
-      service: 'Consultation',
+      serviceId: selectedService.id,
+      service: selectedService.name,
+      serviceName: selectedService.name,
+      servicePrice: selectedService.priceCents,
+      serviceDuration: durationMinutes,
       date,
       time,
     };
-    const [row] = await db
-      .insert(appointments)
-      .values({
-        id: appointment.id,
-        userId: appointment.userId,
-        customerName: appointment.name,
-        customerEmail: appointment.email,
-        service: appointment.service,
-        requestedDate: appointment.date,
-        requestedTime: appointment.time,
-      })
-      .returning();
+    const row = await db.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${date}))`,
+      );
+      const existingRows = await transaction
+        .select({
+          requestedTime: appointments.requestedTime,
+          serviceDuration: appointments.serviceDuration,
+        })
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.requestedDate, date),
+            inArray(appointments.status, ['pending', 'approved']),
+          ),
+        );
+      const requestedStart = minutesFromTime(time);
+      const requestedEnd = requestedStart + durationMinutes;
+      const hasConflict = (Array.isArray(existingRows) ? existingRows : []).some(
+        (existing) => {
+          const existingStart = minutesFromTime(
+            String(existing.requestedTime).slice(0, 5),
+          );
+          const existingDuration = Number.isInteger(existing.serviceDuration)
+            ? existing.serviceDuration
+            : LEGACY_DURATION_MINUTES;
+          return (
+            requestedStart < existingStart + existingDuration &&
+            existingStart < requestedEnd
+          );
+        },
+      );
+      if (hasConflict) {
+        throw Object.assign(
+          new Error(
+            'That time overlaps another appointment. Please choose another available time.',
+          ),
+          { status: 409 },
+        );
+      }
+      const [created] = await transaction
+        .insert(appointments)
+        .values({
+          id: appointment.id,
+          userId: appointment.userId,
+          customerName: appointment.name,
+          customerEmail: appointment.email,
+          service: appointment.service,
+          serviceId: appointment.serviceId,
+          serviceName: appointment.serviceName,
+          servicePrice: appointment.servicePrice,
+          serviceDuration: appointment.serviceDuration,
+          requestedDate: appointment.date,
+          requestedTime: appointment.time,
+        })
+        .returning();
+      if (!created) throw new Error('The database did not return the appointment.');
+      return created;
+    });
     return jsonResponse(
       { appointment: appointmentFromRow(row), userId: appointment.userId },
       201,

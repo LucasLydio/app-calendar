@@ -31,7 +31,9 @@ export default async function handler(request) {
     const content = buildIcsCalendar(
       appointment,
       availability.timeZone,
-      Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60,
+      appointment.serviceDuration ||
+        Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) ||
+        60,
     );
     const filename = appointment.id.replace(/[^a-zA-Z0-9_-]/g, '_');
     return new Response(content, {

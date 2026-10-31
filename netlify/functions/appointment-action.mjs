@@ -35,9 +35,14 @@ export default async function handler(request) {
     ) {
       return jsonResponse({ error: 'reason must be a string.' }, 400);
     }
+    if (body.message !== undefined && typeof body.message !== 'string') {
+      return jsonResponse({ error: 'message must be a string.' }, 400);
+    }
     const decision = action === 'approve' ? 'approved' : 'rejected';
     const rejectionReason =
       action === 'reject' ? body.reason?.trim() || null : null;
+    const notificationMessage =
+      body.message?.trim() || rejectionReason || null;
     const outboxId = crypto.randomUUID();
     const changed = await db.transaction(async (tx) => {
       const [updated] = await tx
@@ -94,7 +99,11 @@ export default async function handler(request) {
             'Content-Type': 'application/json',
             'x-internal-function-token': internalToken,
           },
-          body: JSON.stringify({ appointment, status: decision }),
+          body: JSON.stringify({
+            appointment,
+            status: decision,
+            message: notificationMessage,
+          }),
           signal: AbortSignal.timeout(2500),
         });
         push = { queued: dispatch.status === 202 };

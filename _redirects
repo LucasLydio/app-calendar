@@ -3,7 +3,10 @@
 /api/appointments/:id/ics      /.netlify/functions/appointment-ics?id=:id                       200!
 /api/appointments               /.netlify/functions/appointments                                  200!
 /api/availability               /.netlify/functions/availability                                  200!
+/api/services                   /.netlify/functions/services                                      200!
+/api/push                       /.netlify/functions/push                                          200!
 /api/push/*                     /.netlify/functions/push                                         200!
 /book                           /book.html                                                        200
 /time                           /time.html                                                        200
+/services                       /services.html                                                    200
 /*                              /index.html                                                       200

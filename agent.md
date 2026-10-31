@@ -6,7 +6,7 @@ Daybook is a serverless appointment-management and booking MVP. The deployed pro
 
 The deployed architecture is:
 
-- **Frontend:** static `index.html` management interface, `book.html` public booking page, and `time.html` availability-management page. Admin pages use a responsive sticky top navigation bar with Appointments and Availability links; the public booking page intentionally has no navigation or header controls. Shared tokens and dashboard styles are in `styles.css`; page behavior/styles are split into root-level CSS and JavaScript files. `service-worker.js` supports browser push notifications.
+- **Frontend:** static `index.html` management interface, `book.html` public booking page, `time.html` availability-management page, and `services.html` service-management page. Admin pages use a responsive sticky top navigation bar with Appointments, Availability, and Services links; the public booking page intentionally has no navigation or header controls. Shared tokens and dashboard styles are in `styles.css`; page behavior/styles are split into root-level CSS and JavaScript files. `service-worker.js` supports browser push notifications.
 - **Backend:** ES-module Netlify Functions in `netlify/functions/`, bundled by esbuild. `netlify.toml` maps public `/api/*` paths to function endpoints and serves the static site from `public/`.
 - **Database:** Supabase Postgres accessed through Drizzle ORM and the `postgres` (postgres.js) driver.
 - **Legacy/local server:** `server.js` and `calendar_worker.js` are retained for local/legacy development. Netlify publishes the static pages and functions; do not assume the Express server is the deployed API.
@@ -16,7 +16,7 @@ Keep deployed functions and the legacy Express implementation distinct unless a 
 
 ## 2. Tech Stack & Core Dependencies
 
-- **Frontend:** Vanilla HTML/CSS/JavaScript; static pages are `index.html`, `book.html`, and `time.html`; service worker is `service-worker.js`.
+- **Frontend:** Vanilla HTML/CSS/JavaScript; static pages are `index.html`, `book.html`, `time.html`, and `services.html`; service worker is `service-worker.js`.
 - **Backend:** Netlify Functions (`netlify/functions/*.mjs`) using ES-module default exports and Web `Request`/`Response` APIs.
 - **Database/ORM:** Supabase Postgres, `drizzle-orm/postgres-js`, `postgres` (postgres.js), schema in `db/schema.ts`.
 - **Migration tooling:** `drizzle-kit`, config in `drizzle.config.ts`; generated migrations are under `drizzle/`.
@@ -59,8 +59,10 @@ Drizzle migrations need a session-capable connection for migration locking. Set 
 
 - `availability`: singleton row (`singleton_id = 1`), IANA time zone, JSON weekly slots, update timestamp. Each weekly slot uses `{ "day": "Monday", "active": true, "start": "09:00", "end": "17:00", "blackoutSlots": ["12:00-13:00", "15:00-15:30"] }`. Blocked slots are independent exclusions within operating hours. All seven days are represented; inactive days remain stored with `active: false`. The function normalizes legacy short day keys and the former `blackout` field on read.
 - `date_specific_exceptions`: one-off unavailable windows with UUID, singleton owner ID (`default` until manager authentication exists), exception date, start/end times, and timestamps. A user/date index supports booking lookups. These exceptions take absolute priority over recurring `weeklySlots` and recurring `blackoutSlots`.
-- `appointments`: customer and user IDs, service, date/time, status (`pending`, `approved`, `rejected`), calendar-sync state/error/event metadata, and decision/creation timestamps. Active appointments have a partial unique index on date/time.
-- `push_subscriptions`: browser ID, unique push endpoint, JSON Web Push keys, user ID, timestamps.
+- `services`: offerable service catalog with UUID, name, integer `price_cents`, positive `duration_minutes`, and creation timestamp. Currency is persisted as cents to avoid floating-point storage errors; the API exposes decimal-dollar `price` and integer `priceCents` values. Services are currently managed independently and are not connected to public appointment booking.
+- `appointments`: customer and user IDs, legacy service label, nullable `service_id` foreign key, immutable service snapshots (`service_name`, `service_price` in cents, and `service_duration` in minutes), date/time, status (`pending`, `approved`, `rejected`), calendar-sync state/error/event metadata, and decision/creation timestamps. New public bookings populate every service field. Snapshot/FK columns remain nullable so legacy rows migrate without fabricated pricing; deleting a service sets only `service_id` to null and preserves snapshots. Active appointments have a partial unique index on date/time, while the booking transaction also serializes each date and rejects duration overlaps.
+- `push_subscriptions`: one row per browser subscription with a SHA-256 browser ID, unique HTTPS push endpoint, JSON Web Push keys (`p256dh`, `auth`), stable browser-scoped user ID, and timestamps. Endpoint/key material is sensitive and remains server-side.
+- `appointment_push_subscriptions`: normalized appointment-to-browser association with composite primary key `(appointment_id, browser_id)`. Both foreign keys cascade on deletion so expired endpoints and deleted appointments clean up their mappings.
 - `calendar_outbox`: queued calendar actions with status, attempts, retry time, lock, error, event ID, and appointment foreign key.
 
 ## 4. API Endpoints & Routing
@@ -71,18 +73,24 @@ Routes are configured in `netlify.toml`. Netlify function handlers use ES-module
 - **`GET /api/availability`** -> returns `{"availability":{"timeZone":"...","weeklySlots":[],"dateSpecificExceptions":[],"disabledDates":[],"blackoutHours":[]}}`; array fields are always defined. If no availability row exists it returns all seven days with UTC weekdays active from 09:00–17:00.
 - **`POST|PUT /api/availability`** -> body `{ "timeZone": "Area/Location", "weeklySlots": [{"day":"Monday","active":true,"start":"09:00","end":"17:00","blackoutSlots":["12:00-13:00"]}], "dateSpecificExceptions": [{"date":"2026-11-03","start":"13:00","end":"14:00"}] }`; validates the IANA timezone, recurring schedule, and non-overlapping one-off exceptions, then transactionally replaces the singleton schedule and exception rows. Legacy short weekday keys and stored `blackout` arrays remain accepted during transition.
 - **`GET /time`** -> serves `time.html`, the manager availability editor. The build copies `time.html`, `time.css`, and `time.js` into `public/`.
+- **`GET /services`** -> serves `services.html`, the standalone manager service catalog. The build copies `services.html`, `services.css`, and `services.js` into `public/`.
+- **`GET /api/services`** -> returns `{ "services": [{ "id": "uuid", "name": "Hair Cut", "price": 30, "priceCents": 3000, "durationMinutes": 30, "createdAt": "..." }] }`, newest first; an empty catalog returns `services: []`.
+- **`POST /api/services`** -> body `{ "name": "Hair Cut", "price": 30.00, "durationMinutes": 30 }`; validates values and returns `{ "service": {...} }` with HTTP 201.
+- **`PUT /api/services?id=<uuid>`** -> replaces the editable name, price, and duration fields and returns `{ "service": {...} }`; returns 404 when the service does not exist.
+- **`DELETE /api/services?id=<uuid>`** -> deletes one service and returns `{ "deleted": true, "id": "uuid" }`; returns 404 when the service does not exist.
 - **`GET /api/appointments?status=pending|approved|rejected|all`** -> returns `{ "appointments": [...] }`; status defaults to `pending`. This is a manager-facing listing and must not be publicly exposed without manager authentication.
-- **`GET /api/appointments?view=slots&date=YYYY-MM-DD`** (also accepts `?date=YYYY-MM-DD`) -> always returns `{ "bookedSlots": ["HH:mm", ...] }` for pending/approved bookings, including an empty array when none exist.
-- **`POST /api/appointments`** -> booking body requires `{ "name", "email", "date": "YYYY-MM-DD", "time": "HH:mm" }`; optional `userId`. Creates a pending consultation and returns `{ "appointment": {...}, "userId": "..." }` with HTTP 201. Enforces configured availability, future date/time, and unique active slots.
+- **`GET /api/appointments?ids=<comma-separated IDs>`** -> returns a privacy-reduced batch of appointment ID, service name, date, time, status, and optional rejection message. The booking page uses it to refresh up to 50 locally saved appointments.
+- **`GET /api/appointments?view=slots&date=YYYY-MM-DD&serviceId=<uuid>`** (also accepts `?date=YYYY-MM-DD`) -> always returns `{ "bookedSlots": ["HH:mm", ...], "bookedIntervals": [{ "time": "HH:mm", "durationMinutes": 30 }] }` for pending/approved bookings, including empty arrays when none exist. `bookedSlots` remains for backward compatibility; the public client uses intervals to prevent duration overlaps.
+- **`POST /api/appointments`** -> booking body requires `{ "serviceId": "uuid", "name": "...", "email": "...", "date": "YYYY-MM-DD", "time": "HH:mm" }`; optional `userId`. The handler verifies the service, validates the complete service-duration window against weekly hours and exceptions, serializes bookings for that date, rejects overlaps, and snapshots the service name, price in cents, and duration. Returns `{ "appointment": {...}, "userId": "..." }` with HTTP 201.
 - **`POST /api/appointments/:id/approve`** -> marks a pending appointment approved and queues a calendar outbox job; response includes appointment, `calendarSync: "queued"`, and push queue status. The function also accepts its rewritten `id` and `action` query parameters.
 - **`POST /api/appointments/:id/reject`** -> optional body `{ "reason": "..." }`; marks a pending appointment rejected and returns the appointment and push queue status.
 - **`GET /api/appointments/:id/ics`** -> returns an ICS file for approved appointments; the function receives the appointment ID in the `id` query parameter after rewrite.
 - **`GET /api/push`** -> returns `{ "publicKey": "..." }` when VAPID is configured.
-- **`POST /api/push`** -> body `{ "userId": "...", "subscription": { "endpoint": "https://...", "keys": { "p256dh": "...", "auth": "..." } } }`; saves/updates a subscription and returns HTTP 201 with the user ID.
-- **Internal `POST /.netlify/functions/push-notification-background`** -> requires `x-internal-function-token`; body contains `{ "appointment": {...}, "status": "approved|rejected" }`. Not a public application API.
+- **`POST /api/push`** -> body `{ "userId": "...", "appointmentId": "apt-...", "subscription": { "endpoint": "https://...", "keys": { "p256dh": "...", "auth": "..." } } }`; verifies appointment ownership, upserts the browser subscription, associates it with the appointment, and returns HTTP 201.
+- **Internal `POST /.netlify/functions/push-notification-background`** -> requires `x-internal-function-token`; body contains `{ "appointment": {...}, "status": "approved|rejected", "message": "optional admin message" }`. Not a public application API.
 - **Scheduled `calendar-sync` function** -> runs each minute on published deploys; processes due outbox entries and syncs approved appointments with Google Calendar.
 
-**Security warning:** The existing project documentation notes that manager listing, approval/rejection, and availability updates do not currently authenticate callers. Do not treat these endpoints as secure manager APIs or expose them to untrusted production traffic until authorization is implemented and tested.
+**Security warning:** The existing project documentation notes that manager listing, approval/rejection, availability updates, and service CRUD do not currently authenticate callers. Do not treat these endpoints as secure manager APIs or expose them to untrusted production traffic until authorization is implemented and tested.
 
 ## 5. Design System & UI Tokens
 
@@ -106,7 +114,7 @@ Important keys:
 
 - `DATABASE_URL`: Supabase transaction-mode pooler URL (port `6543`).
 - `MIGRATION_DATABASE_URL`: local Drizzle migration connection, preferably Supabase session-mode pooler (port `5432`).
-- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`: Web Push. The private key is secret; the public key is intended for clients.
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`: Web Push. Public/private keys must be a matching VAPID pair; only the public key is returned to clients. Keep the private key in Netlify Functions secrets. `VAPID_SUBJECT` should be a valid `mailto:` or HTTPS contact URI.
 - `INTERNAL_FUNCTION_TOKEN`: protects internal push dispatch.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_CALENDAR_ID`: Google Calendar integration.
 - `CALENDAR_APPOINTMENT_DURATION_MINUTES`, `CALENDAR_WORKER_MAX_ATTEMPTS`: optional worker settings with code/config defaults.
@@ -118,7 +126,10 @@ Never hardcode or commit secret values, include them in logs, or copy values fro
 ### Implemented
 
 - Netlify DB adapter was removed in favor of Supabase Postgres, Drizzle ORM, and postgres.js.
-- The former admin sidebar was replaced by a sharp-edged, sticky top navigation bar on `index.html` and `time.html`; `book.html` remains an isolated client booking flow without navigation.
+- The former admin sidebar was replaced by a sharp-edged, sticky top navigation bar on `index.html`, `time.html`, and `services.html`; all three admin pages expose Appointments, Availability, and Services. `book.html` remains an isolated client booking flow without navigation.
+- Service CRUD is implemented through `services.html` and `netlify/functions/services.mjs`. The public `book.html` flow now loads this catalog first, keeps date/time controls disabled until a service is selected, and calculates availability using the selected duration on a 30-minute start grid. The public page remains isolated from admin navigation.
+- `book.html` stores device-local booking history under the exact `localStorage` key `my_appointments` as a JSON array of `{ "appointmentId", "serviceName", "date", "time", "status", "message?" }`. Guarded reads/writes prevent storage or parsing failures from breaking booking. Database state remains authoritative and refreshes this history through the batch IDs endpoint.
+- Push permission is requested only from the explicit **Enable status notifications** history action. Once granted, the client registers the root service worker, obtains the public VAPID key from `/api/push`, and associates the subscription with every locally saved appointment. Admin approve/reject actions queue background delivery; push-gateway 404/410 responses retire expired endpoints.
 - Transaction-pooler compatibility guards are in `db/index.ts` (`prepare: false`, SSL required, one connection); client timeouts are configured.
 - Drizzle migration config and generated SQL are in place; migration CLI prefers `MIGRATION_DATABASE_URL`.
 - Netlify handlers use ES module default exports. Shared error handling logs server-side causes and returns safe JSON errors.
@@ -129,7 +140,7 @@ Never hardcode or commit secret values, include them in logs, or copy values fro
 
 ### Not yet verified / next steps
 
-- **Remote database:** earlier local attempts to reach Supabase pooler ports timed out. Do not assume generated migrations or the seed have been applied. Verify all five tables in the intended Supabase project; apply `drizzle/0000_silky_angel.sql`, `drizzle/0001_luxuriant_lilith.sql`, and `supabase/seed.sql` where needed.
+- **Remote database:** earlier local attempts to reach Supabase pooler ports timed out. Do not assume generated migrations or the seed have been applied. Verify all seven tables in the intended Supabase project; apply `drizzle/0000_silky_angel.sql`, `drizzle/0001_luxuriant_lilith.sql`, `drizzle/0002_hard_chat.sql`, `drizzle/0003_lowly_colonel_america.sql`, `drizzle/0004_lovely_shinko_yamashiro.sql`, and `supabase/seed.sql` where needed.
 - **Production endpoints:** after deploy, test `/api/health`, `/api/availability`, public booking in `book.html`, appointment listing/actions only after authorization is addressed, and push subscription/delivery.
 - **Push:** test subscription and notifications across supported browsers; verify VAPID values and the internal dispatch token in Netlify.
 - **Calendar outbox:** scheduled worker is configured once per minute; verify actual retries and successful Google Calendar sync in production.

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#eff2f1" />
+    <title>Services | Daybook</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="services.css" />
+    <script src="services.js" defer></script>
+  </head>
+  <body>
+    <header class="admin-header">
+      <nav class="top-nav" aria-label="Primary navigation">
+        <a class="top-nav-brand" href="/" aria-label="Daybook appointments">
+          <span class="brand-mark" aria-hidden="true">D</span>
+          <span class="brand-name">daybook</span>
+        </a>
+        <div class="top-nav-links">
+          <a class="nav-link" href="/">Appointments</a>
+          <a class="nav-link" href="/time">Availability</a>
+          <a class="nav-link active" href="/services" aria-current="page">Services</a>
+        </div>
+      </nav>
+    </header>
+
+    <div class="app-shell services-shell">
+      <main class="workspace services-workspace">
+        <header class="topbar">
+          <div class="breadcrumb">
+            Workspace <span aria-hidden="true">/</span>
+            <strong>Services</strong>
+          </div>
+          <a class="button button-quiet" href="/">Back to dashboard</a>
+        </header>
+
+        <header class="services-heading">
+          <p class="eyebrow">Management</p>
+          <h1>Services</h1>
+          <p>Manage offered services, pricing, and durations.</p>
+        </header>
+
+        <section class="services-card" aria-labelledby="service-form-title">
+          <div class="services-card-header">
+            <div>
+              <p class="eyebrow">Service details</p>
+              <h2 id="service-form-title">Add a service</h2>
+            </div>
+          </div>
+          <form id="service-form" class="service-form" novalidate>
+            <input id="service-id" type="hidden" />
+            <label class="service-field">
+              <span>Service name</span>
+              <input
+                id="service-name"
+                name="name"
+                type="text"
+                placeholder="Hair Cut"
+                maxlength="120"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label class="service-field">
+              <span>Price ($)</span>
+              <input
+                id="service-price"
+                name="price"
+                type="number"
+                placeholder="30.00"
+                min="0"
+                max="1000000"
+                step="0.01"
+                inputmode="decimal"
+                required
+              />
+            </label>
+            <label class="service-field">
+              <span>Duration</span>
+              <select id="service-duration" name="durationMinutes" required>
+                <option value="15">15 mins</option>
+                <option value="30" selected>30 mins</option>
+                <option value="45">45 mins</option>
+                <option value="60">1 hour</option>
+                <option value="90">1 hour 30 mins</option>
+                <option value="120">2 hours</option>
+              </select>
+            </label>
+            <div class="service-form-actions">
+              <button class="button button-primary" id="submit-service" type="submit">
+                Add Service
+              </button>
+              <button class="button button-quiet" id="cancel-edit" type="button" hidden>
+                Cancel edit
+              </button>
+            </div>
+          </form>
+          <p class="form-error services-error" id="service-error" role="alert"></p>
+        </section>
+
+        <section class="services-card" aria-labelledby="services-list-title">
+          <div class="services-card-header list-heading">
+            <div>
+              <p class="eyebrow">Catalog</p>
+              <h2 id="services-list-title">Offered services</h2>
+            </div>
+            <span class="service-count" id="service-count" aria-label="Number of services">0</span>
+          </div>
+          <div class="services-status" id="services-status" role="status" aria-live="polite">
+            Loading services&hellip;
+          </div>
+          <div class="services-table-wrap" id="services-table-wrap" hidden>
+            <table class="services-table">
+              <thead>
+                <tr>
+                  <th scope="col">Service</th>
+                  <th scope="col">Price</th>
+                  <th scope="col">Duration</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="services-list"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

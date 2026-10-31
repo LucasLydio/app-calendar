@@ -10,6 +10,7 @@ import {
   date,
   time,
   integer,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -74,6 +75,28 @@ export const dateSpecificExceptions = pgTable(
   ],
 );
 
+export const services = pgTable(
+  'services',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    priceCents: integer('price_cents').notNull(),
+    durationMinutes: integer('duration_minutes').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check('services_name_check', sql`char_length(trim(${table.name})) > 0`),
+    check('services_price_check', sql`${table.priceCents} >= 0`),
+    check(
+      'services_duration_check',
+      sql`${table.durationMinutes} > 0`,
+    ),
+    index('services_created_at_idx').on(table.createdAt),
+  ],
+);
+
 export const appointments = pgTable(
   'appointments',
   {
@@ -82,6 +105,12 @@ export const appointments = pgTable(
     customerName: text('customer_name').notNull(),
     customerEmail: text('customer_email').notNull(),
     service: text('service').notNull(),
+    serviceId: uuid('service_id').references(() => services.id, {
+      onDelete: 'set null',
+    }),
+    serviceName: text('service_name'),
+    servicePrice: integer('service_price'),
+    serviceDuration: integer('service_duration'),
     requestedDate: date('appointment_date').notNull(),
     requestedTime: time('appointment_time').notNull(),
     status: text('status')
@@ -110,6 +139,15 @@ export const appointments = pgTable(
       'appointments_calendar_sync_status_check',
       sql`${table.calendarSyncStatus} IN ('not_queued', 'pending', 'synced', 'failed')`,
     ),
+    check(
+      'appointments_service_price_check',
+      sql`${table.servicePrice} IS NULL OR ${table.servicePrice} >= 0`,
+    ),
+    check(
+      'appointments_service_duration_check',
+      sql`${table.serviceDuration} IS NULL OR ${table.serviceDuration} > 0`,
+    ),
+    index('appointments_service_id_idx').on(table.serviceId),
     index('appointments_status_date_idx').on(
       table.status,
       table.requestedDate,
@@ -136,6 +174,25 @@ export const pushSubscriptions = pgTable(
       .defaultNow(),
   },
   (table) => [index('push_subscriptions_user_id_idx').on(table.userId)],
+);
+
+export const appointmentPushSubscriptions = pgTable(
+  'appointment_push_subscriptions',
+  {
+    appointmentId: text('appointment_id')
+      .notNull()
+      .references(() => appointments.id, { onDelete: 'cascade' }),
+    browserId: text('browser_id')
+      .notNull()
+      .references(() => pushSubscriptions.browserId, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appointmentId, table.browserId] }),
+    index('appointment_push_subscriptions_browser_idx').on(table.browserId),
+  ],
 );
 
 export const calendarOutbox = pgTable(

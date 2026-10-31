@@ -1,8 +1,15 @@
 import { eq } from 'drizzle-orm';
 import crypto from 'node:crypto';
 import webPush from 'web-push';
-import { pushSubscriptions } from '../../../db/schema.ts';
-import { db, getSubscriptionsForUser } from './db.mjs';
+import {
+  appointmentPushSubscriptions,
+  pushSubscriptions,
+} from '../../../db/schema.ts';
+import {
+  db,
+  getSubscriptionsForAppointment,
+  getSubscriptionsForUser,
+} from './db.mjs';
 
 let vapidConfigured = false;
 
@@ -26,50 +33,101 @@ export function getVapidPublicKey() {
 }
 
 export async function savePushSubscription(
-  { userId, subscription },
+  { userId, appointmentId, subscription },
   database = db,
 ) {
   const browserId = crypto
     .createHash('sha256')
     .update(subscription.endpoint)
     .digest('hex');
-  await database
-    .insert(pushSubscriptions)
-    .values({
-      browserId,
-      endpoint: subscription.endpoint,
-      keys: subscription.keys,
-      userId,
-    })
-    .onConflictDoUpdate({
-      target: pushSubscriptions.endpoint,
-      set: {
+  await database.transaction(async (transaction) => {
+    await transaction
+      .insert(pushSubscriptions)
+      .values({
+        browserId,
+        endpoint: subscription.endpoint,
         keys: subscription.keys,
         userId,
-        updatedAt: new Date(),
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: {
+          keys: subscription.keys,
+          userId,
+          updatedAt: new Date(),
+        },
+      });
+    await transaction
+      .insert(appointmentPushSubscriptions)
+      .values({ appointmentId, browserId })
+      .onConflictDoNothing();
+  });
 }
 
-export async function sendAppointmentPush(appointment, status, database = db) {
+function statusLabel(status) {
+  return status === 'approved'
+    ? 'Confirmed'
+    : status === 'rejected'
+      ? 'Cancelled'
+      : 'Pending';
+}
+
+function displayDate(date) {
+  const parsed = new Date(`${date}T12:00:00.000Z`);
+  return Number.isNaN(parsed.getTime())
+    ? date
+    : new Intl.DateTimeFormat('en-US', {
+        year: '2-digit',
+        month: '2-digit',
+        day: '2-digit',
+        timeZone: 'UTC',
+      }).format(parsed);
+}
+
+export async function sendAppointmentPush(
+  appointment,
+  status,
+  message,
+  database = db,
+) {
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     console.warn('Push delivery skipped: VAPID keys are not configured.');
     return { attempted: 0, sent: 0, failed: 0 };
   }
   getVapidPublicKey();
-  const subscriptions = await getSubscriptionsForUser(
-    appointment.userId,
-    database,
-  );
+  let subscriptions = [];
+  try {
+    subscriptions = await getSubscriptionsForAppointment(
+      appointment.id,
+      database,
+    );
+  } catch (error) {
+    const missingAssociationTable =
+      error?.code === '42P01' || error?.cause?.code === '42P01';
+    if (!missingAssociationTable) throw error;
+    console.warn(
+      'appointment_push_subscriptions is not migrated yet; falling back to user subscriptions.',
+    );
+  }
+  if (subscriptions.length === 0) {
+    subscriptions = await getSubscriptionsForUser(
+      appointment.userId,
+      database,
+    );
+  }
+  subscriptions = [...new Map(
+    subscriptions.map((entry) => [entry.endpoint, entry]),
+  ).values()];
+  const label = statusLabel(status);
+  const adminMessage = typeof message === 'string' ? message.trim() : '';
   const payload = JSON.stringify({
-    title:
-      status === 'approved' ? 'Appointment approved' : 'Appointment update',
-    body:
-      status === 'approved'
-        ? `Your ${appointment.service} on ${appointment.date} at ${appointment.time} was approved.`
-        : `Your ${appointment.service} request on ${appointment.date} was declined.`,
+    title: 'Appointment Status Updated',
+    body: `Your ${appointment.service} appointment on ${displayDate(appointment.date)} at ${appointment.time} is now ${label}.${adminMessage ? ` Message: ${adminMessage}` : ''}`,
+    url: '/book.html',
     appointmentId: appointment.id,
     status,
+    statusLabel: label,
+    message: adminMessage || undefined,
   });
 
   const results = await Promise.allSettled(

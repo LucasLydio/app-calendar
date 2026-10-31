@@ -59,6 +59,18 @@
   force = true
 
 [[redirects]]
+  from = "/api/services"
+  to = "/.netlify/functions/services"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/push"
+  to = "/.netlify/functions/push"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/push/*"
   to = "/.netlify/functions/push"
   status = 200
@@ -73,6 +85,11 @@
 from = "/time"
 to = "/time.html"
 status = 200
+
+[[redirects]]
+  from = "/services"
+  to = "/services.html"
+  status = 200
 
 [[redirects]]
   from = "/*"

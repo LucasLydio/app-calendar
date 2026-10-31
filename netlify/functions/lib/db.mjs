@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../../../db/index.ts';
 import {
   availability,
+  appointmentPushSubscriptions,
   dateSpecificExceptions,
   pushSubscriptions,
 } from '../../../db/schema.ts';
@@ -14,7 +15,15 @@ export function appointmentFromRow(row) {
     userId: row.userId,
     name: row.customerName,
     email: row.customerEmail,
-    service: row.service,
+    service: row.serviceName || row.service,
+    serviceId: row.serviceId || null,
+    serviceName: row.serviceName || row.service,
+    servicePrice: Number.isInteger(row.servicePrice)
+      ? row.servicePrice
+      : null,
+    serviceDuration: Number.isInteger(row.serviceDuration)
+      ? row.serviceDuration
+      : null,
     date: String(row.requestedDate).slice(0, 10),
     time: String(row.requestedTime).slice(0, 5),
     status: row.status,
@@ -73,6 +82,27 @@ export async function getSubscriptionsForUser(userId, database = db) {
     .from(pushSubscriptions)
     .where(eq(pushSubscriptions.userId, userId));
   return rows.map((row) => ({
+    endpoint: row.endpoint,
+    subscription: { endpoint: row.endpoint, keys: row.keys },
+  }));
+}
+
+export async function getSubscriptionsForAppointment(
+  appointmentId,
+  database = db,
+) {
+  const rows = await database
+    .select({
+      endpoint: pushSubscriptions.endpoint,
+      keys: pushSubscriptions.keys,
+    })
+    .from(appointmentPushSubscriptions)
+    .innerJoin(
+      pushSubscriptions,
+      eq(appointmentPushSubscriptions.browserId, pushSubscriptions.browserId),
+    )
+    .where(eq(appointmentPushSubscriptions.appointmentId, appointmentId));
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
     endpoint: row.endpoint,
     subscription: { endpoint: row.endpoint, keys: row.keys },
   }));

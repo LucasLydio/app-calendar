@@ -27,6 +27,11 @@ const DAY_ALIASES = {
   sat: 'Saturday',
 };
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_SERVICE_NAME_LENGTH = 120;
+const MAX_SERVICE_PRICE = 1_000_000;
+const MAX_SERVICE_DURATION_MINUTES = 1_440;
 
 const appointments = [
   {
@@ -70,6 +75,8 @@ const appointments = [
     status: 'pending',
   },
 ];
+
+const services = [];
 
 let availability = {
   timeZone: 'UTC',
@@ -146,7 +153,164 @@ app.get('/time', (_request, response) => {
   return response.sendFile(path.join(__dirname, 'time.html'));
 });
 
+app.get('/services', (_request, response) => {
+  return response.sendFile(path.join(__dirname, 'services.html'));
+});
+
+function validateServicePayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { error: 'Request body must be a JSON object.' };
+  }
+
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name || name.length > MAX_SERVICE_NAME_LENGTH) {
+    return {
+      error: `name is required and must be ${MAX_SERVICE_NAME_LENGTH} characters or fewer.`,
+    };
+  }
+  if (
+    typeof body.price !== 'number' ||
+    !Number.isFinite(body.price) ||
+    body.price < 0 ||
+    body.price > MAX_SERVICE_PRICE
+  ) {
+    return {
+      error: `price must be a number between 0 and ${MAX_SERVICE_PRICE}.`,
+    };
+  }
+  const priceCents = Math.round(body.price * 100);
+  if (Math.abs(body.price * 100 - priceCents) > Number.EPSILON * 100) {
+    return { error: 'price may contain at most two decimal places.' };
+  }
+  if (
+    typeof body.durationMinutes !== 'number' ||
+    !Number.isInteger(body.durationMinutes) ||
+    body.durationMinutes < 1 ||
+    body.durationMinutes > MAX_SERVICE_DURATION_MINUTES
+  ) {
+    return {
+      error: `durationMinutes must be an integer between 1 and ${MAX_SERVICE_DURATION_MINUTES}.`,
+    };
+  }
+
+  return {
+    values: {
+      name,
+      price: Number((priceCents / 100).toFixed(2)),
+      priceCents,
+      durationMinutes: body.durationMinutes,
+    },
+  };
+}
+
+function serviceIdFromRequest(request) {
+  const id = typeof request.query.id === 'string' ? request.query.id.trim() : '';
+  return UUID_PATTERN.test(id) ? id : null;
+}
+
+app.get('/api/services', (_request, response) => {
+  const results = [...services].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
+  return response.status(200).json({ services: results });
+});
+
+app.post('/api/services', (request, response) => {
+  const validation = validateServicePayload(request.body);
+  if (validation.error) {
+    return response.status(400).json({
+      error: 'Bad Request',
+      message: validation.error,
+    });
+  }
+
+  const service = {
+    id: crypto.randomUUID(),
+    ...validation.values,
+    createdAt: new Date().toISOString(),
+  };
+  services.push(service);
+  return response.status(201).json({ service });
+});
+
+app.put('/api/services', (request, response) => {
+  const id = serviceIdFromRequest(request);
+  if (!id) {
+    return response.status(400).json({
+      error: 'Bad Request',
+      message: 'A valid service id query parameter is required.',
+    });
+  }
+
+  const validation = validateServicePayload(request.body);
+  if (validation.error) {
+    return response.status(400).json({
+      error: 'Bad Request',
+      message: validation.error,
+    });
+  }
+
+  const service = services.find((item) => item.id === id);
+  if (!service) {
+    return response
+      .status(404)
+      .json({ error: 'Not Found', message: 'Service not found.' });
+  }
+  Object.assign(service, validation.values);
+  return response.status(200).json({ service });
+});
+
+app.delete('/api/services', (request, response) => {
+  const id = serviceIdFromRequest(request);
+  if (!id) {
+    return response.status(400).json({
+      error: 'Bad Request',
+      message: 'A valid service id query parameter is required.',
+    });
+  }
+
+  const index = services.findIndex((item) => item.id === id);
+  if (index === -1) {
+    return response
+      .status(404)
+      .json({ error: 'Not Found', message: 'Service not found.' });
+  }
+  const [deletedService] = services.splice(index, 1);
+  return response.status(200).json({ deleted: true, id: deletedService.id });
+});
+
 app.get('/api/appointments', (request, response) => {
+  if (typeof request.query.ids === 'string') {
+    const ids = [...new Set(
+      request.query.ids
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    )];
+    if (
+      ids.length === 0 ||
+      ids.length > 50 ||
+      ids.some((id) => !/^[A-Za-z0-9_-]{1,120}$/.test(id))
+    ) {
+      return response
+        .status(400)
+        .json({ error: 'ids must contain 1 to 50 valid appointment IDs.' });
+    }
+    return response.status(200).json({
+      appointments: appointments
+        .filter((appointment) => ids.includes(appointment.id))
+        .map((appointment) => ({
+          id: appointment.id,
+          serviceName: appointment.serviceName || appointment.service,
+          date: appointment.date,
+          time: appointment.time,
+          status: appointment.status,
+          ...(appointment.rejectionReason && {
+            message: appointment.rejectionReason,
+          }),
+        })),
+    });
+  }
   const requestedDate = request.query.date;
   const slotView =
     request.query.view === 'slots' ||
@@ -160,14 +324,20 @@ app.get('/api/appointments', (request, response) => {
         .status(400)
         .json({ error: 'A valid date (YYYY-MM-DD) is required.' });
     }
-    const bookedSlots = appointments
+    const bookedAppointments = appointments
       .filter(
         (appointment) =>
           appointment.date === requestedDate &&
           ['pending', 'approved'].includes(appointment.status),
-      )
-      .map((appointment) => appointment.time);
-    return response.status(200).json({ bookedSlots });
+      );
+    const bookedIntervals = bookedAppointments.map((appointment) => ({
+      time: appointment.time,
+      durationMinutes: Number.isInteger(appointment.serviceDuration)
+        ? appointment.serviceDuration
+        : Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60,
+    }));
+    const bookedSlots = bookedIntervals.map((interval) => interval.time);
+    return response.status(200).json({ bookedSlots, bookedIntervals });
   }
 
   const requestedStatus = request.query.status || 'pending';
@@ -190,12 +360,12 @@ app.get('/api/appointments', (request, response) => {
 });
 
 app.post('/api/appointments', (request, response) => {
-  const { name, email, date, time } = request.body || {};
+  const { name, email, serviceId, date, time } = request.body || {};
   const requestedUserId = request.body?.userId;
   const normalizedName = typeof name === 'string' ? name.trim() : '';
   const normalizedEmail = typeof email === 'string' ? email.trim() : '';
-  const durationMinutes =
-    Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60;
+  const selectedService = services.find((service) => service.id === serviceId);
+  const durationMinutes = selectedService?.durationMinutes;
   const parsedDate =
     typeof date === 'string' ? new Date(`${date}T00:00:00.000Z`) : null;
   const isValidDate =
@@ -208,6 +378,9 @@ app.post('/api/appointments', (request, response) => {
     normalizedName.length > 120 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) ||
     normalizedEmail.length > 254 ||
+    typeof serviceId !== 'string' ||
+    !UUID_PATTERN.test(serviceId) ||
+    !selectedService ||
     typeof date !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
     !isValidDate ||
@@ -216,7 +389,7 @@ app.post('/api/appointments', (request, response) => {
   ) {
     return response.status(400).json({
       error:
-        'name, valid email, date (YYYY-MM-DD), and time (HH:mm) are required.',
+        'name, valid email, serviceId, date (YYYY-MM-DD), and time (HH:mm) are required.',
     });
   }
 
@@ -270,7 +443,7 @@ app.post('/api/appointments', (request, response) => {
       return (
         requestedStart >= slotStart &&
         requestedEnd <= slotEnd &&
-        (requestedStart - slotStart) % durationMinutes === 0 &&
+        (requestedStart - slotStart) % 30 === 0 &&
         !overlapsBlackout
       );
     });
@@ -307,8 +480,11 @@ app.post('/api/appointments', (request, response) => {
     const existingStart =
       Number(appointment.time.slice(0, 2)) * 60 +
       Number(appointment.time.slice(3));
+    const existingDuration = Number.isInteger(appointment.serviceDuration)
+      ? appointment.serviceDuration
+      : Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60;
     return (
-      requestedStart < existingStart + durationMinutes &&
+      requestedStart < existingStart + existingDuration &&
       existingStart < requestedEnd
     );
   });
@@ -325,7 +501,11 @@ app.post('/api/appointments', (request, response) => {
     userId,
     name: normalizedName,
     email: normalizedEmail,
-    service: 'Consultation',
+    serviceId: selectedService.id,
+    service: selectedService.name,
+    serviceName: selectedService.name,
+    servicePrice: selectedService.priceCents,
+    serviceDuration: selectedService.durationMinutes,
     date,
     time,
     status: 'pending',
@@ -352,7 +532,9 @@ app.get('/api/appointments/:id/ics', (request, response) => {
   const calendar = buildIcsCalendar(appointment, {
     timeZone: availability.timeZone,
     durationMinutes:
-      Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) || 60,
+      appointment.serviceDuration ||
+      Number(process.env.CALENDAR_APPOINTMENT_DURATION_MINUTES) ||
+      60,
   });
   const fileId = appointment.id.replace(/[^a-zA-Z0-9_-]/g, '_');
   response.set({
@@ -451,6 +633,58 @@ app.get('/api/push/vapid-public-key', (_request, response) => {
   return response.status(200).json({ publicKey: vapidPublicKey });
 });
 
+app.get('/api/push', (_request, response) => {
+  return response.status(200).json({ publicKey: vapidPublicKey });
+});
+
+app.post('/api/push', (request, response) => {
+  const { userId, appointmentId, subscription } = request.body || {};
+  const appointment = appointments.find((item) => item.id === appointmentId);
+  if (typeof userId !== 'string' || !userId.trim()) {
+    return response.status(400).json({ error: 'userId is required.' });
+  }
+  if (typeof appointmentId !== 'string' || !appointmentId.trim()) {
+    return response.status(400).json({ error: 'appointmentId is required.' });
+  }
+  if (!appointment) {
+    return response.status(404).json({ error: 'Appointment not found.' });
+  }
+  if (appointment.userId !== userId.trim()) {
+    return response.status(403).json({
+      error: 'The appointment does not belong to this browser.',
+    });
+  }
+  if (
+    !subscription ||
+    typeof subscription.endpoint !== 'string' ||
+    !subscription.endpoint.startsWith('https://') ||
+    typeof subscription.keys?.p256dh !== 'string' ||
+    typeof subscription.keys?.auth !== 'string'
+  ) {
+    return response
+      .status(400)
+      .json({ error: 'A valid Web Push subscription is required.' });
+  }
+  const subscriptionId = crypto
+    .createHash('sha256')
+    .update(subscription.endpoint)
+    .digest('hex');
+  const existing = subscriptions.get(subscription.endpoint);
+  const appointmentIds = new Set(existing?.appointmentIds || []);
+  appointmentIds.add(appointmentId);
+  subscriptions.set(subscription.endpoint, {
+    id: subscriptionId,
+    userId: userId.trim(),
+    subscription,
+    appointmentIds: [...appointmentIds],
+  });
+  return response.status(201).json({
+    userId: userId.trim(),
+    appointmentId,
+    registered: true,
+  });
+});
+
 app.post('/api/push/subscriptions', (request, response) => {
   const { userId, subscription } = request.body || {};
 
@@ -491,12 +725,9 @@ async function notifyAppointmentUser(appointment, status) {
     ([, entry]) => entry.userId === appointment.userId,
   );
   const payload = JSON.stringify({
-    title:
-      status === 'approved' ? 'Appointment approved' : 'Appointment update',
-    body:
-      status === 'approved'
-        ? `Your ${appointment.service} on ${appointment.date} at ${appointment.time} was approved.`
-        : `Your ${appointment.service} request on ${appointment.date} was declined.`,
+    title: 'Appointment Status Updated',
+    body: `Your ${appointment.service} appointment on ${appointment.date} at ${appointment.time} is now ${status === 'approved' ? 'Confirmed' : 'Cancelled'}.${appointment.rejectionReason ? ` Message: ${appointment.rejectionReason}` : ''}`,
+    url: '/book.html',
     appointmentId: appointment.id,
     status,
   });
@@ -624,6 +855,7 @@ if (require.main === module) {
 module.exports = {
   app,
   appointments,
+  services,
   availability,
   subscriptions,
   calendarSyncOutbox,

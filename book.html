@@ -17,6 +17,32 @@
         <p class="masthead-note">Thoughtful time, well spent</p>
       </header>
 
+      <details class="booking-history" id="booking-history">
+        <summary>
+          <span>
+            <span class="eyebrow">Your bookings</span>
+            <strong>History</strong>
+          </span>
+          <span class="history-count" id="history-count">0</span>
+        </summary>
+        <div class="history-body">
+          <div class="history-actions">
+            <p id="history-status" role="status" aria-live="polite">
+              Your appointments saved on this device appear here.
+            </p>
+            <button
+              class="history-notification-button"
+              id="enable-notifications"
+              type="button"
+              hidden
+            >
+              Enable status notifications
+            </button>
+          </div>
+          <div class="history-list" id="history-list"></div>
+        </div>
+      </details>
+
       <section class="intro" aria-labelledby="page-title">
         <p class="eyebrow">Appointments</p>
         <h1 id="page-title">Make room for a good conversation.</h1>
@@ -30,11 +56,27 @@
         <section class="booking-panel" aria-labelledby="booking-title">
           <header class="panel-heading">
             <p class="eyebrow">New request</p>
-            <h2 id="booking-title">Choose a time</h2>
-            <p>All times are shown in the schedule's time zone.</p>
+            <h2 id="booking-title">Choose a service and time</h2>
+            <p>Select a service first. Times use the schedule's time zone.</p>
           </header>
           <div class="panel-body">
             <form id="booking-form">
+              <fieldset class="service-picker">
+                <legend class="field-label">1. Choose a service</legend>
+                <div
+                  class="service-options"
+                  id="service-options"
+                  role="radiogroup"
+                  aria-label="Available services"
+                ></div>
+                <input id="booking-service" name="serviceId" type="hidden" required />
+                <p class="service-status" id="service-status" role="status">
+                  Loading services&hellip;
+                </p>
+              </fieldset>
+
+              <fieldset class="booking-details" id="booking-details" disabled>
+                <legend class="field-label">2. Choose a date and time</legend>
               <label class="field-label" for="booking-date">Date</label>
               <input
                 class="date-field"
@@ -82,6 +124,7 @@
                   />
                 </div>
               </div>
+              </fieldset>
 
               <p
                 class="message"
@@ -107,6 +150,10 @@
             <h2 id="summary-title">A time to connect</h2>
           </div>
           <div class="summary-details">
+            <div class="summary-row">
+              <span>Service</span>
+              <strong id="summary-service">Select a service</strong>
+            </div>
             <div class="summary-row">
               <span>Date</span>
               <strong id="summary-date">Select a date</strong>
